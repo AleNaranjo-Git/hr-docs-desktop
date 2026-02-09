@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.db.auth_service import sign_out
+from app.modules.company_clients.page import CompanyClientsPage
 
 
 class Sidebar(QWidget):
@@ -130,7 +131,7 @@ class MainWindow(QMainWindow):
         self.go_to("add_client")
 
     def _build_pages(self) -> None:
-        self._add_page("add_client", PlaceholderPage("Add Client"))
+        self._add_page("add_client", CompanyClientsPage())
         self._add_page("add_worker", PlaceholderPage("Add Worker"))
         self._add_page("incidents", PlaceholderPage("Incidents"))
         self._add_page("reports", PlaceholderPage("Reports"))
