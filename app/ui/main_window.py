@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from app.db.auth_service import sign_out
+
 
 class Sidebar(QWidget):
     navigate = Signal(str)
@@ -96,6 +98,7 @@ class PlaceholderPage(QWidget):
 
 
 class MainWindow(QMainWindow):
+    logged_out = Signal()
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("HR Docs Desktop")
@@ -142,5 +145,6 @@ class MainWindow(QMainWindow):
         self.sidebar.set_active(key)
 
     def on_logout(self) -> None:
-        # Skeleton behavior only
-        QMessageBox.information(self, "Logout", "Logout requested (skeleton).")
+        sign_out()
+        self.logged_out.emit()
+        self.close()
