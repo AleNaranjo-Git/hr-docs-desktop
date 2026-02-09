@@ -1,17 +1,13 @@
+from __future__ import annotations
 import sys
 from PySide6.QtWidgets import QApplication
-from app.ui.main_window import MainWindow
+from app.ui.login_window import LoginWindow
 
-
-def main() -> int:
+def main() -> None:
     app = QApplication(sys.argv)
-
-    win = MainWindow()
-    win.resize(1200, 750)
-    win.show()
-
-    return app.exec()
-
+    w = LoginWindow()
+    w.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
