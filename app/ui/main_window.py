@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from typing import Optional, Dict
+
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QMainWindow,
@@ -20,7 +22,7 @@ class Sidebar(QWidget):
     navigate = Signal(str)
     request_logout = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFixedWidth(220)
 
@@ -32,21 +34,24 @@ class Sidebar(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(title)
 
-        # Route key -> Button label
-        self.menu_items = [
+        self.menu_items: list[tuple[str, str]] = [
             ("add_client", "Add Client"),
             ("add_worker", "Add Worker"),
             ("incidents", "Incidents"),
             ("reports", "Reports"),
         ]
 
-        self.buttons: dict[str, QPushButton] = {}
+        self.buttons: Dict[str, QPushButton] = {}
 
         for key, label in self.menu_items:
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setMinimumHeight(42)
-            btn.clicked.connect(lambda checked, k=key: self._on_menu_clicked(k))
+
+            btn.setProperty("route_key", key)
+
+            btn.clicked.connect(self._on_menu_button_clicked)
+
             self.buttons[key] = btn
             layout.addWidget(btn)
 
@@ -57,10 +62,19 @@ class Sidebar(QWidget):
         self.logout_btn.clicked.connect(self._confirm_logout)
         layout.addWidget(self.logout_btn)
 
-        # Default selection
         self.set_active("add_client")
 
-    def _on_menu_clicked(self, key: str) -> None:
+    @Slot(bool)
+    def _on_menu_button_clicked(self, checked: bool) -> None:
+        _ = checked
+        sender = self.sender()
+        if not isinstance(sender, QPushButton):
+            return
+
+        key = sender.property("route_key")
+        if not isinstance(key, str):
+            return
+
         self.set_active(key)
         self.navigate.emit(key)
 
@@ -83,7 +97,7 @@ class Sidebar(QWidget):
 
 
 class PlaceholderPage(QWidget):
-    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+    def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
 
@@ -100,6 +114,7 @@ class PlaceholderPage(QWidget):
 
 class MainWindow(QMainWindow):
     logged_out = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("HR Docs Desktop")
@@ -111,23 +126,18 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # Sidebar
         self.sidebar = Sidebar()
         root_layout.addWidget(self.sidebar)
 
-        # Content area
         self.stack = QStackedWidget()
         root_layout.addWidget(self.stack, stretch=1)
 
-        # Pages
         self.pages: dict[str, int] = {}
         self._build_pages()
 
-        # Wire navigation
         self.sidebar.navigate.connect(self.go_to)
         self.sidebar.request_logout.connect(self.on_logout)
 
-        # Default page
         self.go_to("add_client")
 
     def _build_pages(self) -> None:
@@ -139,12 +149,15 @@ class MainWindow(QMainWindow):
     def _add_page(self, key: str, page: QWidget) -> None:
         self.pages[key] = self.stack.addWidget(page)
 
+    @Slot(str)
     def go_to(self, key: str) -> None:
-        if key not in self.pages:
+        idx = self.pages.get(key)
+        if idx is None:
             return
-        self.stack.setCurrentIndex(self.pages[key])
+        self.stack.setCurrentIndex(idx)
         self.sidebar.set_active(key)
 
+    @Slot()
     def on_logout(self) -> None:
         sign_out()
         self.logged_out.emit()
