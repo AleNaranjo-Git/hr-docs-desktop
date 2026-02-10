@@ -10,6 +10,33 @@ class AuthError(Exception):
     pass
 
 
+def _fetch_firm_id_for_user(user_id: str) -> str:
+    sb = get_supabase()
+    try:
+        resp = (
+            sb.table("profiles")
+            .select("firm_id")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        raise AuthError(f"Failed to fetch firm profile: {e}") from e
+
+    data = getattr(resp, "data", None)
+    if not data:
+        raise AuthError(
+            "Login succeeded but no active profile was found for this user. "
+            "Make sure a row exists in profiles with is_active=true."
+        )
+
+    firm_id = data[0].get("firm_id")
+    if not firm_id:
+        raise AuthError("Profile found but firm_id is missing.")
+    return firm_id
+
+
 def sign_in(email: str, password: str) -> SessionState:
     email = email.strip()
     if not email or not password:
@@ -25,7 +52,15 @@ def sign_in(email: str, password: str) -> SessionState:
     if session is None:
         raise AuthError("Login failed: no session returned.")
 
+    
+    user_id = getattr(session.user, "id", "") or ""
+    firm_id = _fetch_firm_id_for_user(user_id)
+
+    
     state = SessionState.from_supabase(session)
+    firm_id = _fetch_firm_id_for_user(state.user_id)
+    state.firm_id = firm_id
+    
     AppSession.current = state
     return state
 

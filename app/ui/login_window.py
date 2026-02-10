@@ -20,7 +20,7 @@ class LoginWindow(QWidget):
         root.setSpacing(10)
 
         title = QLabel("Sign in")
-        title.setAlignment(Qt.AlignLeft)
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         root.addWidget(title)
 
@@ -33,7 +33,7 @@ class LoginWindow(QWidget):
         # Password
         root.addWidget(QLabel("Password"))
         self.password_input = QLineEdit()
-        self.password_input.setEchoMode(QLineEdit.Password)
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("••••••••")
         root.addWidget(self.password_input)
 
