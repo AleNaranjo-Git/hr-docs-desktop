@@ -10,23 +10,20 @@ class SessionState:
     email: str
     access_token: str
     refresh_token: str
-    firm_id: str  # multi-tenant scope (required for all data access / RLS)
+    firm_id: str  # required tenant scope
 
     @staticmethod
-    def from_supabase(session: Any, firm_id: str) -> "SessionState":
-        if not firm_id:
-            raise ValueError("firm_id is required to create SessionState")
-
-        user = session.user
+    def from_supabase(session: Any) -> "SessionState":
+        user = getattr(session, "user", None)
         email = getattr(user, "email", "") or ""
         user_id = getattr(user, "id", "") or ""
 
         return SessionState(
             user_id=user_id,
             email=email,
-            access_token=session.access_token,
-            refresh_token=session.refresh_token,
-            firm_id=firm_id,
+            access_token=getattr(session, "access_token", "") or "",
+            refresh_token=getattr(session, "refresh_token", "") or "",
+            firm_id="",
         )
 
 
@@ -40,3 +37,9 @@ class AppSession:
     @classmethod
     def clear(cls) -> None:
         cls.current = None
+
+    @classmethod
+    def require(cls) -> SessionState:
+        if cls.current is None:
+            raise RuntimeError("Not logged in.")
+        return cls.current
