@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from typing import Optional
+
+from PySide6.QtCore import QModelIndex
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QTableView, QMessageBox
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QTableView,
+    QMessageBox,
 )
 
 from app.repositories.company_clients_repo import CompanyClientsRepo
@@ -41,6 +49,8 @@ class CompanyClientsPage(QWidget):
         self.table = QTableView()
         self.model = CompanyClientsTableModel()
         self.table.setModel(self.model)
+
+        # NOTE: doubleClicked emits a QModelIndex
         self.table.doubleClicked.connect(self._on_deactivate)
 
         layout.addWidget(self.table)
@@ -54,7 +64,7 @@ class CompanyClientsPage(QWidget):
     def _on_add(self) -> None:
         name = self.name_input.text().strip()
         legal_id = self.legal_id_input.text().strip()
-        desc = self.desc_input.text().strip() or None
+        desc: Optional[str] = self.desc_input.text().strip() or None
 
         if not name or not legal_id:
             QMessageBox.warning(self, "Error", "Name and Legal ID are required")
@@ -68,16 +78,18 @@ class CompanyClientsPage(QWidget):
 
         self.refresh()
 
-    def _on_deactivate(self, index) -> None:
-        row = index.row()
+    def _on_deactivate(self, index: QModelIndex) -> None:
+        row: int = index.row()
         client_id = self.model.client_id_at(row)
 
         confirm = QMessageBox.question(
             self,
             "Deactivate",
             "Deactivate this client?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        if confirm == QMessageBox.Yes:
+        if confirm == QMessageBox.StandardButton.Yes:
             CompanyClientsRepo.deactivate(client_id)
             self.refresh()
