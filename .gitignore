@@ -10,6 +10,15 @@ venv/
 *.db
 *.sqlite
 
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Inno Setup
+Output/
+*.iss.bak
+
 # IDEs
 .idea/
 .vscode/*
@@ -19,6 +28,6 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Enviorment
+# Environment
 .env
 .env.*
