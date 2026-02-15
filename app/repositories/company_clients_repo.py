@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict, Any, List
+from typing import TypedDict, Any, List, cast
 
 from app.db.supabase_client import get_supabase
 from app.core.session import AppSession
@@ -30,14 +30,14 @@ class CompanyClientsRepo:
             .execute()
         )
 
-        if hasattr(resp, "error") and resp.error:
+        if getattr(resp, "error", None):
             raise RuntimeError(f"Failed to load clients: {resp.error}")
 
         data = resp.data or []
         if not isinstance(data, list):
             raise RuntimeError("Unexpected response while loading clients.")
 
-        return data
+        return cast(List[CompanyClientRow], data)
 
     @staticmethod
     def create(name: str, legal_id: str, description: str | None) -> None:
@@ -52,11 +52,11 @@ class CompanyClientsRepo:
         }
 
         resp = sb.table("company_clients").insert(payload).execute()
-        
-        events().company_clients_changed.emit()
 
-        if hasattr(resp, "error") and resp.error:
+        if getattr(resp, "error", None):
             raise RuntimeError(f"Failed to create client: {resp.error}")
+
+        events().company_clients_changed.emit()
 
     @staticmethod
     def deactivate(client_id: str) -> None:
@@ -71,7 +71,7 @@ class CompanyClientsRepo:
             .execute()
         )
 
-        if hasattr(resp, "error") and resp.error:
+        if getattr(resp, "error", None):
             raise RuntimeError(f"Failed to deactivate client: {resp.error}")
-        
+
         events().company_clients_changed.emit()

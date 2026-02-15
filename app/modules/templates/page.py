@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QCompleter,
 )
 
+from app.core.events import events
 from app.repositories.document_templates_repo import (
     DocumentTemplatesRepo,
     TemplateRow,
@@ -87,8 +88,13 @@ class TemplatesPage(QWidget):
 
         self._selected_file: Optional[str] = None
 
-        self._load_clients()
+        # ---- Subscribe to global events ----
+        events().company_clients_changed.connect(self._on_company_clients_changed)
+        events().templates_changed.connect(self._on_templates_changed)
+
+        # ---- Initial load ----
         self._load_types()
+        self._load_clients()
         self.refresh()
         self._apply_ui_state()
 
@@ -106,12 +112,12 @@ class TemplatesPage(QWidget):
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         combo.setCompleter(completer)
 
+        # Typed text must match an item
         def apply_text_to_selection() -> None:
             text = combo.currentText().strip()
             if not text:
                 combo.setCurrentIndex(-1)
                 return
-
             idx = combo.findText(text, Qt.MatchFlag.MatchFixedString)
             combo.setCurrentIndex(idx if idx >= 0 else -1)
 
@@ -141,10 +147,14 @@ class TemplatesPage(QWidget):
         try:
             clients = DocumentTemplatesRepo.list_company_clients_options()
         except Exception as e:
+            self.client_filter.blockSignals(True)
             self.client_filter.clear()
             self.client_filter.addItem("All", "")
+            self.client_filter.blockSignals(False)
+
             self.client_select.clear()
             self._set_hint(f"Could not load clients: {e}")
+            self._apply_ui_state()
             return
 
         # Filter combo defaults to All
@@ -157,11 +167,14 @@ class TemplatesPage(QWidget):
         self.client_filter.blockSignals(False)
 
         # Create template requires a specific client (but can be locked by filter)
+        self.client_select.blockSignals(True)
         self.client_select.clear()
         for c in clients:
             self.client_select.addItem(c["name"], c["id"])
+        self.client_select.blockSignals(False)
 
         self._apply_client_lock()
+        self._apply_ui_state()
 
     def _load_types(self) -> None:
         try:
@@ -169,12 +182,15 @@ class TemplatesPage(QWidget):
         except Exception as e:
             self.template_type.clear()
             self._set_hint(f"Could not load incident types: {e}")
+            self._apply_ui_state()
             return
 
         self.template_type.clear()
         for t in types_:
             label = f"{t['name']} ({t['code']})"
             self.template_type.addItem(label, t["code"])
+
+        self._apply_ui_state()
 
     def _on_filter_changed(self) -> None:
         self._apply_client_lock()
@@ -228,7 +244,7 @@ class TemplatesPage(QWidget):
         self.file_path_input.setText(path)
 
     def _on_upload(self) -> None:
-        # Basic hard guard: no clients/types
+        # Hard guard: no clients/types
         if self.client_select.count() == 0:
             QMessageBox.warning(self, "Error", "No clients exist yet. Create a client first.")
             return
@@ -258,7 +274,6 @@ class TemplatesPage(QWidget):
             QMessageBox.warning(self, "Error", "Please choose a .docx file.")
             return
 
-        # Disable button to avoid double submissions
         self.upload_btn.setEnabled(False)
         try:
             DocumentTemplatesRepo.create_template(
@@ -268,24 +283,23 @@ class TemplatesPage(QWidget):
             )
         except Exception as e:
             msg = str(e)
-
-            # Friendly-ish message for the common Supabase RLS case
             if "row-level security" in msg.lower() or "42501" in msg:
                 msg = (
                     "Upload failed due to database permissions (RLS).\n\n"
                     "This usually means the RLS policy does not allow this update/insert for your user.\n\n"
                     f"Details: {e}"
                 )
-
             QMessageBox.critical(self, "Upload failed", msg)
             return
         finally:
             self.upload_btn.setEnabled(True)
 
-        # Clear selection
         self._selected_file = None
         self.file_path_input.clear()
+
+        events().templates_changed.emit()
         self.refresh()
+        self._apply_ui_state()
 
     def _on_deactivate(self, index: QModelIndex) -> None:
         row = index.row()
@@ -293,20 +307,30 @@ class TemplatesPage(QWidget):
         if not template_id:
             return
 
-        confirm = QMessageBox.question(
-            self,
-            "Deactivate",
-            "Deactivate this template?",
-        )
+        confirm = QMessageBox.question(self, "Deactivate", "Deactivate this template?")
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
 
-        if confirm == QMessageBox.StandardButton.Yes:
-            try:
-                DocumentTemplatesRepo.deactivate(template_id)
-            except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
-                return
-            self.refresh()
-            
+        try:
+            DocumentTemplatesRepo.deactivate(template_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+            return
+
+        events().templates_changed.emit()
+        self.refresh()
+
+    # ---- Event handlers ----
+    def _on_company_clients_changed(self) -> None:
+        # New client added elsewhere -> reload combos + lock + UI state + refresh table
+        self._load_clients()
+        self.refresh()
+        self._apply_ui_state()
+
+    def _on_templates_changed(self) -> None:
+        self.refresh()
+
+    # Optional explicit calls
     def reload_clients(self) -> None:
         self._load_clients()
 

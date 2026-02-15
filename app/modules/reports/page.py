@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -17,11 +16,14 @@ from PySide6.QtWidgets import (
     QCompleter,
 )
 
+from app.core.events import events
 from app.repositories.reports_repo import ReportsRepo
 from app.services.reports_excel_exporter import ReportsExcelExporter, ReportsMetadata
 
 
 class ReportsPage(QWidget):
+    DEFAULT_HINT = "Exports an Excel report with multiple sheets based on received_day."
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -57,15 +59,20 @@ class ReportsPage(QWidget):
 
         layout.addLayout(filters)
 
-        self.hint = QLabel("Exports an Excel report with multiple sheets based on received_day.")
+        self.hint = QLabel(self.DEFAULT_HINT)
         self.hint.setStyleSheet("color: #666;")
         layout.addWidget(self.hint)
 
         layout.addStretch(1)
 
-        self._load_clients()
+        events().company_clients_changed.connect(self.reload_clients)
+
         self._set_default_dates()
+        self._load_clients()
         self._apply_ui_state()
+
+    def _set_hint(self, text: str) -> None:
+        self.hint.setText(text or "")
 
     def _setup_searchable_combo(self, combo: QComboBox) -> None:
         combo.setEditable(True)
@@ -77,26 +84,18 @@ class ReportsPage(QWidget):
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         combo.setCompleter(completer)
 
-    def _load_clients(self) -> None:
-        try:
-            clients = ReportsRepo.list_company_clients_options()
-        except Exception as e:
-            # No crash: just disable export and show hint
-            self.client_filter.clear()
-            self.client_filter.addItem("All", "")
-            self.hint.setText(f"Could not load clients: {e}")
-            return
+        # Hardening: typed text must match an item
+        def apply_text_to_selection() -> None:
+            text = combo.currentText().strip()
+            if not text:
+                combo.setCurrentIndex(0)  # default to "All"
+                return
+            idx = combo.findText(text, Qt.MatchFlag.MatchFixedString)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
 
-        self.client_filter.blockSignals(True)
-        self.client_filter.clear()
-        self.client_filter.addItem("All", "")  # UI in English
-        for c in clients:
-            self.client_filter.addItem(c["name"], c["id"])
-        self.client_filter.setCurrentIndex(0)
-        self.client_filter.blockSignals(False)
-
-        if len(clients) == 0:
-            self.hint.setText("No clients found. Add a client first to generate reports.")
+        completer.activated.connect(lambda _: apply_text_to_selection())
+        if combo.lineEdit():
+            combo.lineEdit().editingFinished.connect(apply_text_to_selection)
 
     def _set_default_dates(self) -> None:
         today = date.today()
@@ -104,10 +103,44 @@ class ReportsPage(QWidget):
         self.date_from.setDate(first)
         self.date_to.setDate(today)
 
-    def _apply_ui_state(self) -> None:
-        # if only "All" exists, you still can export, but it will show "no incidents" later.
-        # If clients couldn't load, hint was set and export can be disabled by content check.
+    def _load_clients(self) -> None:
+        self.client_filter.blockSignals(True)
+        self.client_filter.clear()
+        self.client_filter.addItem("All", "")
+        self.client_filter.setCurrentIndex(0)
+        self.client_filter.blockSignals(False)
+
+        self._set_hint(self.DEFAULT_HINT)
+
+        try:
+            clients = ReportsRepo.list_company_clients_options()
+        except Exception as e:
+            self._set_hint(f"Could not load clients: {e}")
+            self.export_btn.setEnabled(False)
+            return
+
+        self.client_filter.blockSignals(True)
+        self.client_filter.clear()
+        self.client_filter.addItem("All", "")
+        for c in clients:
+            self.client_filter.addItem(c["name"], c["id"])
+        self.client_filter.setCurrentIndex(0)
+        self.client_filter.blockSignals(False)
+
+        if len(clients) == 0:
+            self._set_hint("No clients found. Add a client first to generate reports.")
+        else:
+            self._set_hint(self.DEFAULT_HINT)
+
         self.export_btn.setEnabled(True)
+
+    def _apply_ui_state(self) -> None:
+        if self.client_filter.count() == 0:
+            self.export_btn.setEnabled(False)
+        elif "Could not load clients" in (self.hint.text() or ""):
+            self.export_btn.setEnabled(False)
+        else:
+            self.export_btn.setEnabled(True)
 
     def _on_export(self) -> None:
         self.export_btn.setEnabled(False)
@@ -124,7 +157,6 @@ class ReportsPage(QWidget):
                 QMessageBox.warning(self, "Error", "From date must be <= To date.")
                 return
 
-            # Pull data
             try:
                 rows = ReportsRepo.list_incidents_for_reports(
                     date_from=d_from,
@@ -171,6 +203,7 @@ class ReportsPage(QWidget):
             QMessageBox.information(self, "Done", "Report exported successfully.")
         finally:
             self.export_btn.setEnabled(True)
-            
+
     def reload_clients(self) -> None:
         self._load_clients()
+        self._apply_ui_state()

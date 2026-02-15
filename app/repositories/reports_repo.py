@@ -40,6 +40,9 @@ class ReportsRepo:
             .execute()
         )
 
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(resp.error)
+
         data = resp.data or []
         out: List[dict] = []
         for r in data:
@@ -54,15 +57,6 @@ class ReportsRepo:
         date_to: date,
         company_client_id: Optional[str],
     ) -> List[ReportIncidentRow]:
-        """
-        Pull incidents by firm + received_day range.
-
-        Schema used (your exact fields):
-          - incidents: firm_id, worker_id, incident_type_id, received_day
-          - workers: company_client_id, full_name, national_id
-          - company_clients: name
-          - incident_types: code, name
-        """
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
@@ -79,6 +73,10 @@ class ReportsRepo:
             .order("received_day", desc=False)
             .execute()
         )
+
+        # Optional hardening
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(resp.error)
 
         data = resp.data or []
         out: List[ReportIncidentRow] = []

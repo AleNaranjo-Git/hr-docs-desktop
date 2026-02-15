@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QCompleter,
 )
 
+from app.core.events import events
 from app.repositories.incidents_repo import IncidentsRepo, IncidentRow
 from app.modules.incidents.model import IncidentsTableModel
 
@@ -27,6 +28,15 @@ class IncidentsPage(QWidget):
         super().__init__()
 
         layout = QVBoxLayout(self)
+
+        title = QLabel("Incidents")
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        layout.addWidget(title)
+
+        # Non-blocking hint (replaces popups like "No workers")
+        self.hint = QLabel("")
+        self.hint.setStyleSheet("color: #666;")
+        layout.addWidget(self.hint)
 
         # ---- Worker filter/target ----
         top = QHBoxLayout()
@@ -89,11 +99,18 @@ class IncidentsPage(QWidget):
         self.table.doubleClicked.connect(self._on_delete)
         layout.addWidget(self.table)
 
+        # ---- Subscribe to global events ----
+        events().workers_changed.connect(self._on_workers_changed)
+        events().incidents_changed.connect(self._on_incidents_changed)
+
         # Initial load
-        self._load_workers()
         self._load_types()
+        self._load_workers()
         self._sync_form_state()
         self.refresh()
+
+    def _set_hint(self, text: str) -> None:
+        self.hint.setText(text or "")
 
     def _setup_searchable_combo(self, combo: QComboBox) -> None:
         combo.setEditable(True)
@@ -105,11 +122,24 @@ class IncidentsPage(QWidget):
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         combo.setCompleter(completer)
 
+        # Optional hardening (same pattern as other pages): typed text must match
+        def apply_text_to_selection() -> None:
+            text = combo.currentText().strip()
+            if not text:
+                combo.setCurrentIndex(-1)
+                return
+            idx = combo.findText(text, Qt.MatchFlag.MatchFixedString)
+            combo.setCurrentIndex(idx if idx >= 0 else -1)
+
+        completer.activated.connect(lambda _: apply_text_to_selection())
+        if combo.lineEdit():
+            combo.lineEdit().editingFinished.connect(apply_text_to_selection)
+
     def _load_workers(self) -> None:
         try:
             workers = IncidentsRepo.list_workers_options()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load workers.\n\n{e}")
+            self._set_hint(f"Could not load workers: {e}")
             workers = []
 
         self.worker_combo.blockSignals(True)
@@ -121,29 +151,33 @@ class IncidentsPage(QWidget):
         self.worker_combo.blockSignals(False)
 
         if not workers:
-            QMessageBox.information(
-                self,
-                "No workers",
-                "No active workers found. Create a worker first.",
-            )
+            # NO POPUP — just a hint
+            self._set_hint("No workers yet. Create a worker first to add incidents.")
+        else:
+            # Clear hint only if the hint was about missing workers
+            if "No workers yet" in self.hint.text():
+                self._set_hint("")
+
+        self._sync_form_state()
 
     def _load_types(self) -> None:
         try:
-            types = IncidentsRepo.list_incident_types_options()
+            types_ = IncidentsRepo.list_incident_types_options()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load incident types.\n\n{e}")
-            types = []
+            self._set_hint(f"Could not load incident types: {e}")
+            types_ = []
 
+        self.type_combo.blockSignals(True)
         self.type_combo.clear()
-        for t in types:
+        for t in types_:
             self.type_combo.addItem(t["label"], t["id"])
+        self.type_combo.blockSignals(False)
 
-        if not types:
-            QMessageBox.information(
-                self,
-                "No incident types",
-                "No incident types found. Seed the incident_types table first.",
-            )
+        if not types_:
+            # Non-blocking hint
+            self._set_hint("No incident types found. Seed the incident_types table first.")
+
+        self._sync_form_state()
 
     def _on_worker_changed(self) -> None:
         self._sync_form_state()
@@ -154,14 +188,25 @@ class IncidentsPage(QWidget):
         Save requires:
         - worker not All
         - incident type selected
+        - and workers/types exist
         """
+        has_workers = self.worker_combo.count() > 1  # includes "All"
+        has_types = self.type_combo.count() > 0
+
         worker_id = self.worker_combo.currentData()
         worker_ok = isinstance(worker_id, str) and bool(worker_id.strip())
 
         type_id = self.type_combo.currentData()
         type_ok = isinstance(type_id, int)
 
-        self.save_btn.setEnabled(worker_ok and type_ok)
+        form_enabled = has_workers and has_types
+        self.type_combo.setEnabled(form_enabled)
+        self.incident_date.setEnabled(form_enabled)
+        self.received_day.setEnabled(form_enabled)
+        self.manual_cb.setEnabled(form_enabled)
+        self.observations.setEnabled(form_enabled)
+
+        self.save_btn.setEnabled(worker_ok and type_ok and form_enabled)
 
     def refresh(self) -> None:
         worker_id = self.worker_combo.currentData()
@@ -171,7 +216,7 @@ class IncidentsPage(QWidget):
         try:
             rows: List[IncidentRow] = IncidentsRepo.list_recent(worker_id=worker_id or None)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load incidents.\n\n{e}")
+            self._set_hint(f"Could not load incidents: {e}")
             rows = []
 
         self.model.load(rows)
@@ -191,7 +236,6 @@ class IncidentsPage(QWidget):
         received_day_str = self.received_day.date().toString("yyyy-MM-dd")
 
         if received_day_str < incident_date_str:
-            # not “wrong”, but usually suspicious. you can remove this if you want.
             confirm = QMessageBox.question(
                 self,
                 "Check dates",
@@ -225,6 +269,8 @@ class IncidentsPage(QWidget):
         self.incident_date.setDate(QDate.currentDate())
         self.received_day.setDate(QDate.currentDate())
 
+        # Notify + refresh
+        events().incidents_changed.emit()
         self.refresh()
 
     def _on_delete(self, index: QModelIndex) -> None:
@@ -241,8 +287,18 @@ class IncidentsPage(QWidget):
             QMessageBox.warning(self, "Error", f"Could not delete incident:\n{e}")
             return
 
+        events().incidents_changed.emit()
         self.refresh()
-        
+
+    # ---- Event handlers ----
+    def _on_workers_changed(self) -> None:
+        self._load_workers()
+        self.refresh()
+
+    def _on_incidents_changed(self) -> None:
+        self.refresh()
+
+    # Optional explicit calls
     def reload_workers(self) -> None:
         self._load_workers()
 
