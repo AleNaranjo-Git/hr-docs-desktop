@@ -20,6 +20,7 @@ from app.modules.workers.page import WorkersPage
 from app.modules.incidents.page import IncidentsPage
 from app.modules.templates.page import TemplatesPage
 from app.modules.generate_documents.page import GenerateDocumentsPage
+from app.modules.reports.page import ReportsPage
 
 
 class Sidebar(QWidget):
@@ -138,7 +139,7 @@ class MainWindow(QMainWindow):
         self._add_page("add_worker", WorkersPage())
         self._add_page("incidents", IncidentsPage())
         self._add_page("generate_documents", GenerateDocumentsPage())
-        self._add_page("reports", PlaceholderPage("Reports"))
+        self._add_page("reports", ReportsPage())
 
     def _add_page(self, key: str, page: QWidget) -> None:
         self.pages[key] = self.stack.addWidget(page)
