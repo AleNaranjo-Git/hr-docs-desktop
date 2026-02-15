@@ -28,14 +28,14 @@ class IncidentsPage(QWidget):
 
         layout = QVBoxLayout(self)
 
-        # ---- Filter / Target worker (single control) ----
+        # ---- Worker filter/target ----
         top = QHBoxLayout()
         top.addWidget(QLabel("Worker:"))
 
         self.worker_combo = QComboBox()
         self.worker_combo.setMinimumWidth(360)
         self._setup_searchable_combo(self.worker_combo)
-        self.worker_combo.currentIndexChanged.connect(self.refresh)
+        self.worker_combo.currentIndexChanged.connect(self._on_worker_changed)
 
         top.addWidget(self.worker_combo)
         top.addStretch(1)
@@ -87,12 +87,12 @@ class IncidentsPage(QWidget):
         self.model = IncidentsTableModel()
         self.table.setModel(self.model)
         self.table.doubleClicked.connect(self._on_delete)
-
         layout.addWidget(self.table)
 
-        # Load dropdowns + data
+        # Initial load
         self._load_workers()
         self._load_types()
+        self._sync_form_state()
         self.refresh()
 
     def _setup_searchable_combo(self, combo: QComboBox) -> None:
@@ -106,28 +106,74 @@ class IncidentsPage(QWidget):
         combo.setCompleter(completer)
 
     def _load_workers(self) -> None:
-        workers = IncidentsRepo.list_workers_options()
+        try:
+            workers = IncidentsRepo.list_workers_options()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load workers.\n\n{e}")
+            workers = []
 
         self.worker_combo.blockSignals(True)
         self.worker_combo.clear()
         self.worker_combo.addItem("All", "")  # filter option
         for w in workers:
             self.worker_combo.addItem(w["label"], w["id"])
+        self.worker_combo.setCurrentIndex(0)
         self.worker_combo.blockSignals(False)
 
+        if not workers:
+            QMessageBox.information(
+                self,
+                "No workers",
+                "No active workers found. Create a worker first.",
+            )
+
     def _load_types(self) -> None:
-        types = IncidentsRepo.list_incident_types_options()
+        try:
+            types = IncidentsRepo.list_incident_types_options()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load incident types.\n\n{e}")
+            types = []
 
         self.type_combo.clear()
         for t in types:
             self.type_combo.addItem(t["label"], t["id"])
+
+        if not types:
+            QMessageBox.information(
+                self,
+                "No incident types",
+                "No incident types found. Seed the incident_types table first.",
+            )
+
+    def _on_worker_changed(self) -> None:
+        self._sync_form_state()
+        self.refresh()
+
+    def _sync_form_state(self) -> None:
+        """
+        Save requires:
+        - worker not All
+        - incident type selected
+        """
+        worker_id = self.worker_combo.currentData()
+        worker_ok = isinstance(worker_id, str) and bool(worker_id.strip())
+
+        type_id = self.type_combo.currentData()
+        type_ok = isinstance(type_id, int)
+
+        self.save_btn.setEnabled(worker_ok and type_ok)
 
     def refresh(self) -> None:
         worker_id = self.worker_combo.currentData()
         if not isinstance(worker_id, str) or not worker_id.strip():
             worker_id = ""
 
-        rows: List[IncidentRow] = IncidentsRepo.list_recent(worker_id=worker_id or None)
+        try:
+            rows: List[IncidentRow] = IncidentsRepo.list_recent(worker_id=worker_id or None)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load incidents.\n\n{e}")
+            rows = []
+
         self.model.load(rows)
 
     def _on_add(self) -> None:
@@ -144,9 +190,20 @@ class IncidentsPage(QWidget):
         incident_date_str = self.incident_date.date().toString("yyyy-MM-dd")
         received_day_str = self.received_day.date().toString("yyyy-MM-dd")
 
+        if received_day_str < incident_date_str:
+            # not “wrong”, but usually suspicious. you can remove this if you want.
+            confirm = QMessageBox.question(
+                self,
+                "Check dates",
+                "Received day is earlier than Incident date. Continue?",
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+
         observations_text = self.observations.toPlainText().strip()
         observations: Optional[str] = observations_text or None
 
+        self.save_btn.setEnabled(False)
         try:
             IncidentsRepo.create(
                 worker_id=worker_id,
@@ -159,7 +216,10 @@ class IncidentsPage(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not create incident:\n{e}")
             return
+        finally:
+            self._sync_form_state()
 
+        # reset UI
         self.observations.clear()
         self.manual_cb.setChecked(False)
         self.incident_date.setDate(QDate.currentDate())
@@ -171,16 +231,14 @@ class IncidentsPage(QWidget):
         row = index.row()
         incident_id = self.model.incident_id_at(row)
 
-        confirm = QMessageBox.question(
-            self,
-            "Delete Incident",
-            "Delete this incident?",
-        )
+        confirm = QMessageBox.question(self, "Delete Incident", "Delete this incident?")
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
 
-        if confirm == QMessageBox.StandardButton.Yes:
-            try:
-                IncidentsRepo.delete(incident_id)
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Could not delete incident:\n{e}")
-                return
-            self.refresh()
+        try:
+            IncidentsRepo.delete(incident_id)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not delete incident:\n{e}")
+            return
+
+        self.refresh()

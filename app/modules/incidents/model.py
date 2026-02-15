@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Any
 
 from PySide6.QtCore import QAbstractTableModel, Qt, QModelIndex, QPersistentModelIndex
 
@@ -24,7 +24,7 @@ class IncidentsTableModel(QAbstractTableModel):
 
     def load(self, rows: List[IncidentRow]) -> None:
         self.beginResetModel()
-        self._rows = rows
+        self._rows = list(rows)
         self.endResetModel()
 
     def rowCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:
@@ -33,7 +33,11 @@ class IncidentsTableModel(QAbstractTableModel):
     def columnCount(self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()) -> int:
         return len(self.HEADERS)
 
-    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = int(Qt.ItemDataRole.DisplayRole)):
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> Any:
         if not index.isValid() or role != int(Qt.ItemDataRole.DisplayRole):
             return None
 
@@ -57,9 +61,15 @@ class IncidentsTableModel(QAbstractTableModel):
 
         return None
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = int(Qt.ItemDataRole.DisplayRole)):
+    def headerData(
+        self,
+        section: int,
+        orientation: Qt.Orientation,
+        role: int = int(Qt.ItemDataRole.DisplayRole),
+    ) -> Any:
         if role == int(Qt.ItemDataRole.DisplayRole) and orientation == Qt.Orientation.Horizontal:
-            return self.HEADERS[int(section)]
+            if 0 <= int(section) < len(self.HEADERS):
+                return self.HEADERS[int(section)]
         return None
 
     def incident_id_at(self, row: int) -> str:

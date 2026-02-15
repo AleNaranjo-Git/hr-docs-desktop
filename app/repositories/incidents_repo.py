@@ -31,13 +31,10 @@ class IncidentRow(TypedDict):
 class IncidentsRepo:
     @staticmethod
     def list_workers_options() -> List[WorkerOption]:
-        """
-        Returns active workers for the current firm.
-        Label includes company client name to disambiguate duplicates.
-        """
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
+        # IMPORTANT: your workers table FK is company_client_id (not client_id)
         resp = (
             sb.table("workers")
             .select("id, full_name, company_clients(name)")
@@ -47,24 +44,31 @@ class IncidentsRepo:
             .execute()
         )
 
-        data = resp.data or []
-        out: List[WorkerOption] = []
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to load workers: {resp.error}")
 
+        data = resp.data or []
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected response while loading workers.")
+
+        out: List[WorkerOption] = []
         for r in data:
             if not isinstance(r, dict):
                 continue
 
-            full_name = str(r.get("full_name", "") or "")
+            worker_id = str(r.get("id", "") or "").strip()
+            full_name = str(r.get("full_name", "") or "").strip()
+
             embedded = r.get("company_clients")
             client_name = ""
             if isinstance(embedded, dict):
-                client_name = str(embedded.get("name", "") or "")
+                client_name = str(embedded.get("name", "") or "").strip()
 
-            label = full_name
-            if client_name:
-                label = f"{full_name} — {client_name}"
+            if not worker_id or not full_name:
+                continue
 
-            out.append({"id": str(r.get("id", "") or ""), "label": label})
+            label = f"{full_name} — {client_name}" if client_name else full_name
+            out.append({"id": worker_id, "label": label})
 
         return out
 
@@ -79,9 +83,14 @@ class IncidentsRepo:
             .execute()
         )
 
-        data = resp.data or []
-        out: List[IncidentTypeOption] = []
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to load incident types: {resp.error}")
 
+        data = resp.data or []
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected response while loading incident types.")
+
+        out: List[IncidentTypeOption] = []
         for r in data:
             if not isinstance(r, dict):
                 continue
@@ -90,8 +99,8 @@ class IncidentsRepo:
             if not isinstance(type_id, int):
                 continue
 
-            code = str(r.get("code", "") or "")
-            name = str(r.get("name", "") or "")
+            code = str(r.get("code", "") or "").strip()
+            name = str(r.get("name", "") or "").strip()
             label = f"{code} — {name}" if name else code
 
             out.append({"id": type_id, "label": label})
@@ -117,23 +126,27 @@ class IncidentsRepo:
             query = query.eq("worker_id", worker_id)
 
         resp = query.execute()
+
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to load incidents: {resp.error}")
+
         data = resp.data or []
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected response while loading incidents.")
 
         out: List[IncidentRow] = []
         for r in data:
             if not isinstance(r, dict):
                 continue
 
-            worker_name = ""
             w = r.get("workers")
-            if isinstance(w, dict):
-                worker_name = str(w.get("full_name", "") or "")
+            worker_name = str(w.get("full_name", "") or "") if isinstance(w, dict) else ""
 
-            incident_type = ""
             it = r.get("incident_types")
+            incident_type = ""
             if isinstance(it, dict):
-                it_code = str(it.get("code", "") or "")
-                it_name = str(it.get("name", "") or "")
+                it_code = str(it.get("code", "") or "").strip()
+                it_name = str(it.get("name", "") or "").strip()
                 incident_type = f"{it_code} — {it_name}" if it_name else it_code
 
             out.append(
@@ -145,7 +158,7 @@ class IncidentsRepo:
                     "incident_date": str(r.get("incident_date", "") or ""),
                     "received_day": str(r.get("received_day", "") or ""),
                     "manual_handling": bool(r.get("manual_handling", False)),
-                    "observations": str(r.get("observations", "") or ""),
+                    "observations": "" if r.get("observations") is None else str(r.get("observations")),
                     "created_at": str(r.get("created_at", "") or ""),
                 }
             )
@@ -175,11 +188,23 @@ class IncidentsRepo:
             "manual_handling": manual_handling,
         }
 
-        sb.table("incidents").insert(payload).execute()
+        resp = sb.table("incidents").insert(payload).execute()
+
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to create incident: {resp.error}")
 
     @staticmethod
     def delete(incident_id: str) -> None:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        sb.table("incidents").delete().eq("id", incident_id).eq("firm_id", firm_id).execute()
+        resp = (
+            sb.table("incidents")
+            .delete()
+            .eq("id", incident_id)
+            .eq("firm_id", firm_id)
+            .execute()
+        )
+
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to delete incident: {resp.error}")
