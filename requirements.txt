@@ -2,4 +2,4 @@ PySide6
 supabase
 python-dotenv
 python-docx
-openpyxl>=3.1.0
+openpyxl>=3.1.2

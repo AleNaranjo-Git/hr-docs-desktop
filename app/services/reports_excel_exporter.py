@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -12,7 +13,7 @@ from app.repositories.reports_repo import ReportIncidentRow
 
 
 SPANISH_MONTHS = [
-    "",  # 1-index
+    "",
     "enero",
     "febrero",
     "marzo",
@@ -44,6 +45,15 @@ def _auto_fit(ws) -> None:
         ws.column_dimensions[col_letter].width = min(max_len + 2, 60)
 
 
+_sheet_bad = re.compile(r"[\[\]\:\*\?\/\\]+")
+
+
+def _safe_sheet_name(name: str) -> str:
+    s = name.strip()
+    s = _sheet_bad.sub("-", s)
+    return s[:31] if len(s) > 31 else s
+
+
 @dataclass(frozen=True)
 class ReportsMetadata:
     date_from: date
@@ -59,7 +69,6 @@ class ReportsExcelExporter:
         meta: ReportsMetadata,
     ) -> Workbook:
         wb = Workbook()
-        # Remove default sheet
         default = wb.active
         wb.remove(default)
 
@@ -79,7 +88,7 @@ class ReportsExcelExporter:
 
     @staticmethod
     def _sheet_resumen_por_tipo(wb: Workbook, incidents: List[ReportIncidentRow], meta: ReportsMetadata) -> None:
-        ws = wb.create_sheet("Resumen - Por tipo")
+        ws = wb.create_sheet(_safe_sheet_name("Resumen - Por tipo"))
         ReportsExcelExporter._add_report_header(ws, meta)
 
         counts: Dict[Tuple[str, str], int] = defaultdict(int)
@@ -94,17 +103,14 @@ class ReportsExcelExporter:
 
     @staticmethod
     def _sheet_resumen_por_trabajador(wb: Workbook, incidents: List[ReportIncidentRow], meta: ReportsMetadata) -> None:
-        ws = wb.create_sheet("Resumen - Por trabajador")
+        ws = wb.create_sheet(_safe_sheet_name("Resumen - Por trabajador"))
         ReportsExcelExporter._add_report_header(ws, meta)
 
-        # Determine the incident types present (columns)
         type_list = sorted(
             {(r.incident_type_code, r.incident_type_name) for r in incidents},
             key=lambda x: (x[0], x[1]),
         )
 
-        # worker_key -> counts per type
-        # worker_key: (company_client_name, worker_full_name, worker_national_id)
         by_worker: Dict[Tuple[str, str, str], Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         totals: Dict[Tuple[str, str, str], int] = defaultdict(int)
 
@@ -113,8 +119,7 @@ class ReportsExcelExporter:
             by_worker[wk][r.incident_type_code] += 1
             totals[wk] += 1
 
-        header = ["Cliente", "Trabajador", "Cédula", "Total"]
-        header += [f"{code}" for code, _ in type_list]
+        header = ["Cliente", "Trabajador", "Cédula", "Total"] + [f"{code}" for code, _ in type_list]
         ws.append(header)
 
         for wk in sorted(by_worker.keys(), key=lambda x: (x[0], x[1], x[2])):
@@ -128,10 +133,7 @@ class ReportsExcelExporter:
 
     @staticmethod
     def _sheet_resumen_por_cliente(wb: Workbook, incidents: List[ReportIncidentRow], meta: ReportsMetadata) -> None:
-        """
-        Useful when meta.client_name is 'Todos'. Still included always.
-        """
-        ws = wb.create_sheet("Resumen - Por cliente")
+        ws = wb.create_sheet(_safe_sheet_name("Resumen - Por cliente"))
         ReportsExcelExporter._add_report_header(ws, meta)
 
         counts: Dict[str, int] = defaultdict(int)
@@ -146,7 +148,7 @@ class ReportsExcelExporter:
 
     @staticmethod
     def _sheet_detalle(wb: Workbook, incidents: List[ReportIncidentRow], meta: ReportsMetadata) -> None:
-        ws = wb.create_sheet("Detalle")
+        ws = wb.create_sheet(_safe_sheet_name("Detalle"))
         ReportsExcelExporter._add_report_header(ws, meta)
 
         ws.append(
