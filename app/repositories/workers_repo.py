@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from app.core.session import AppSession
 from app.db.supabase_client import get_supabase
-
+from app.core.events import events
 
 class WorkerRow(TypedDict):
     id: str
@@ -99,6 +99,8 @@ class WorkersRepo:
         }
 
         sb.table("workers").insert(payload).execute()
+        
+        events().workers_changed.emit()
 
     @staticmethod
     def deactivate(worker_id: str) -> None:
@@ -106,3 +108,5 @@ class WorkersRepo:
         firm_id = AppSession.require().firm_id
 
         sb.table("workers").update({"is_active": False}).eq("id", worker_id).eq("firm_id", firm_id).execute()
+        
+        events().workers_changed.emit()

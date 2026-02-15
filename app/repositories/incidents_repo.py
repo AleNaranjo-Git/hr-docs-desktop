@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from app.core.session import AppSession
 from app.db.supabase_client import get_supabase
+from app.core.events import events
 
 
 class WorkerOption(TypedDict):
@@ -192,6 +193,8 @@ class IncidentsRepo:
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to create incident: {resp.error}")
+        
+        events().incidents_changed.emit()
 
     @staticmethod
     def delete(incident_id: str) -> None:
@@ -208,3 +211,5 @@ class IncidentsRepo:
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to delete incident: {resp.error}")
+        
+        events().incidents_changed.emit()

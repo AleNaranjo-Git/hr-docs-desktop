@@ -171,3 +171,6 @@ class ReportsPage(QWidget):
             QMessageBox.information(self, "Done", "Report exported successfully.")
         finally:
             self.export_btn.setEnabled(True)
+            
+    def reload_clients(self) -> None:
+        self._load_clients()

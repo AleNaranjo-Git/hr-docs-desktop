@@ -344,3 +344,6 @@ class GenerateDocumentsPage(QWidget):
             "Done",
             f"Generated {generated} document(s).\nRecorded {db_written} row(s) in generated_documents.",
         )
+        
+    def reload_clients(self) -> None:
+        self._load_clients()

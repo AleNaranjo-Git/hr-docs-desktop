@@ -4,6 +4,7 @@ from typing import TypedDict, Any, List
 
 from app.db.supabase_client import get_supabase
 from app.core.session import AppSession
+from app.core.events import events
 
 
 class CompanyClientRow(TypedDict):
@@ -51,6 +52,8 @@ class CompanyClientsRepo:
         }
 
         resp = sb.table("company_clients").insert(payload).execute()
+        
+        events().company_clients_changed.emit()
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to create client: {resp.error}")
@@ -70,3 +73,5 @@ class CompanyClientsRepo:
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to deactivate client: {resp.error}")
+        
+        events().company_clients_changed.emit()

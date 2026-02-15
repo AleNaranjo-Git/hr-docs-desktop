@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from app.core.session import AppSession
 from app.db.supabase_client import get_supabase
+from app.core.events import events
 
 
 class CompanyClientOption(TypedDict):
@@ -211,6 +212,8 @@ class DocumentTemplatesRepo:
         }
 
         sb.table("document_templates").insert(payload).execute()
+        
+        events().templates_changed.emit()
 
     @staticmethod
     def deactivate(template_id: str) -> None:
@@ -220,3 +223,5 @@ class DocumentTemplatesRepo:
         sb.table("document_templates").update(
             {"is_active": False}
         ).eq("id", template_id).eq("firm_id", firm_id).execute()
+        
+        events().templates_changed.emit()

@@ -306,3 +306,9 @@ class TemplatesPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
                 return
             self.refresh()
+            
+    def reload_clients(self) -> None:
+        self._load_clients()
+
+    def reload_types(self) -> None:
+        self._load_types()

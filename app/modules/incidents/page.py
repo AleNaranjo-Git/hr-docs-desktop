@@ -242,3 +242,9 @@ class IncidentsPage(QWidget):
             return
 
         self.refresh()
+        
+    def reload_workers(self) -> None:
+        self._load_workers()
+
+    def reload_types(self) -> None:
+        self._load_types()

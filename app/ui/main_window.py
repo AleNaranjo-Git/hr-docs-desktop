@@ -21,6 +21,7 @@ from app.modules.incidents.page import IncidentsPage
 from app.modules.templates.page import TemplatesPage
 from app.modules.generate_documents.page import GenerateDocumentsPage
 from app.modules.reports.page import ReportsPage
+from app.core.events import events
 
 
 class Sidebar(QWidget):
@@ -125,21 +126,44 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         root_layout.addWidget(self.stack, stretch=1)
 
+        # Keep actual instances (not only indexes) so we can refresh them from events
+        self.company_clients_page: CompanyClientsPage | None = None
+        self.workers_page: WorkersPage | None = None
+        self.templates_page: TemplatesPage | None = None
+        self.incidents_page: IncidentsPage | None = None
+        self.generate_documents_page: GenerateDocumentsPage | None = None
+        self.reports_page: ReportsPage | None = None
+
         self.pages: dict[str, int] = {}
         self._build_pages()
 
+        # Navigation
         self.sidebar.navigate.connect(self.go_to)
         self.sidebar.request_logout.connect(self.on_logout)
+
+        # Global refresh wiring (scalable)
+        ev = events()
+        ev.company_clients_changed.connect(self._on_company_clients_changed)
+        ev.workers_changed.connect(self._on_workers_changed)
+        ev.incidents_changed.connect(self._on_incidents_changed)
+        ev.templates_changed.connect(self._on_templates_changed)
 
         self.go_to("add_client")
 
     def _build_pages(self) -> None:
-        self._add_page("add_client", CompanyClientsPage())
-        self._add_page("add_template", TemplatesPage())
-        self._add_page("add_worker", WorkersPage())
-        self._add_page("incidents", IncidentsPage())
-        self._add_page("generate_documents", GenerateDocumentsPage())
-        self._add_page("reports", ReportsPage())
+        self.company_clients_page = CompanyClientsPage()
+        self.templates_page = TemplatesPage()
+        self.workers_page = WorkersPage()
+        self.incidents_page = IncidentsPage()
+        self.generate_documents_page = GenerateDocumentsPage()
+        self.reports_page = ReportsPage()
+
+        self._add_page("add_client", self.company_clients_page)
+        self._add_page("add_template", self.templates_page)
+        self._add_page("add_worker", self.workers_page)
+        self._add_page("incidents", self.incidents_page)
+        self._add_page("generate_documents", self.generate_documents_page)
+        self._add_page("reports", self.reports_page)
 
     def _add_page(self, key: str, page: QWidget) -> None:
         self.pages[key] = self.stack.addWidget(page)
@@ -149,6 +173,52 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentIndex(self.pages[key])
         self.sidebar.set_active(key)
+
+    # -----------------------
+    # Event-driven refresh
+    # -----------------------
+    def _on_company_clients_changed(self) -> None:
+        # CompanyClients list itself
+        if self.company_clients_page:
+            self.company_clients_page.refresh()
+
+        # Company clients are used as dropdowns in these pages
+        if self.workers_page:
+            # implement reload_clients() on WorkersPage (or call _load_clients if you expose it)
+            if hasattr(self.workers_page, "reload_clients"):
+                self.workers_page.reload_clients()
+            self.workers_page.refresh()
+
+        if self.templates_page:
+            if hasattr(self.templates_page, "reload_clients"):
+                self.templates_page.reload_clients()
+            self.templates_page.refresh()
+
+        if self.generate_documents_page:
+            if hasattr(self.generate_documents_page, "reload_clients"):
+                self.generate_documents_page.reload_clients()
+
+        if self.reports_page:
+            if hasattr(self.reports_page, "reload_clients"):
+                self.reports_page.reload_clients()
+
+    def _on_workers_changed(self) -> None:
+        if self.workers_page:
+            self.workers_page.refresh()
+
+        # Incidents page needs workers list for the combo
+        if self.incidents_page:
+            if hasattr(self.incidents_page, "reload_workers"):
+                self.incidents_page.reload_workers()
+            self.incidents_page.refresh()
+
+    def _on_incidents_changed(self) -> None:
+        if self.incidents_page:
+            self.incidents_page.refresh()
+
+    def _on_templates_changed(self) -> None:
+        if self.templates_page:
+            self.templates_page.refresh()
 
     def on_logout(self) -> None:
         sign_out()

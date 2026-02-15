@@ -247,3 +247,7 @@ class WorkersPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
                 return
             self.refresh()
+            
+    def reload_clients(self) -> None:
+        self._load_clients()
+        self._apply_filter_to_form()
