@@ -18,6 +18,7 @@ from app.db.auth_service import sign_out
 from app.modules.company_clients.page import CompanyClientsPage
 from app.modules.workers.page import WorkersPage
 from app.modules.incidents.page import IncidentsPage
+from app.modules.templates.page import TemplatesPage
 
 
 class Sidebar(QWidget):
@@ -132,7 +133,7 @@ class MainWindow(QMainWindow):
 
     def _build_pages(self) -> None:
         self._add_page("add_client", CompanyClientsPage())
-        self._add_page("add_template", PlaceholderPage("Add Template"))
+        self._add_page("add_template", TemplatesPage())
         self._add_page("add_worker", WorkersPage())
         self._add_page("incidents", IncidentsPage())
         self._add_page("reports", PlaceholderPage("Reports"))
