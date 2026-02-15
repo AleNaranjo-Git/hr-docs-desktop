@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -22,13 +22,23 @@ from app.repositories.generate_documents_repo import (
     GenerateDocumentsRepo,
     IncidentForDoc,
 )
+from app.repositories.generated_documents_repo import GeneratedDocumentsRepo
 
 from app.services.document_renderer import (
     DocContext,
     build_output_filename,
     render_docx,
     save_bytes,
+    assert_required_placeholders,
 )
+
+
+# Required placeholders by incident_type_code
+REQUIRED_FIELDS: Dict[str, List[str]] = {
+    "JOB_ABANDONMENT": ["today", "code", "name", "incident_date", "observations"],
+    "ABSENCE": ["today", "code", "name", "incident_date"],
+    "LATE_ARRIVAL": ["today", "code", "name", "incident_date"],
+}
 
 
 class GenerateDocumentsPage(QWidget):
@@ -65,7 +75,9 @@ class GenerateDocumentsPage(QWidget):
 
         self.out_folder_input = QLineEdit()
         self.out_folder_input.setReadOnly(True)
-        self.out_folder_input.setPlaceholderText("Choose an output folder for generated documents...")
+        self.out_folder_input.setPlaceholderText(
+            "Choose an output folder for generated documents..."
+        )
 
         self.pick_folder_btn = QPushButton("Choose Folder")
         self.pick_folder_btn.clicked.connect(self._pick_output_folder)
@@ -119,7 +131,9 @@ class GenerateDocumentsPage(QWidget):
 
     def _on_generate(self) -> None:
         if not self._output_folder:
-            QMessageBox.warning(self, "Missing folder", "Please choose an output folder first.")
+            QMessageBox.warning(
+                self, "Missing folder", "Please choose an output folder first."
+            )
             return
 
         q_from = self.date_from.date()
@@ -129,7 +143,9 @@ class GenerateDocumentsPage(QWidget):
         date_to = date(q_to.year(), q_to.month(), q_to.day())
 
         if date_from > date_to:
-            QMessageBox.warning(self, "Invalid range", "From date cannot be after To date.")
+            QMessageBox.warning(
+                self, "Invalid range", "From date cannot be after To date."
+            )
             return
 
         client_id = self.client_filter.currentData()
@@ -148,33 +164,145 @@ class GenerateDocumentsPage(QWidget):
             return
 
         if not incidents:
-            QMessageBox.information(self, "No incidents", "No incidents found for the selected filters.")
+            QMessageBox.information(
+                self, "No incidents", "No incidents found for the selected filters."
+            )
             return
 
+        # -------------------------
+        # PRE-FLIGHT (ALL-OR-NOTHING)
+        # -------------------------
         today = date.today()
-        generated = 0
-        failures: List[str] = []
+
+        errors: List[str] = []
+
+        # Cache templates by (company_client_id, template_key)
+        template_cache: Dict[Tuple[str, str], bytes] = {}
+
+        # Cache active template metadata by (company_client_id, template_key)
+        active_template_cache: Dict[Tuple[str, str], Tuple[str, int]] = {}
+
+        # Duplicate tracking (already generated) - we will SKIP them in generation
+        already_generated: List[str] = []
 
         for inc in incidents:
-            try:
-                if not inc.code.strip():
-                    raise RuntimeError(
-                        f"Incident {inc.id} has empty code. "
-                        "Make sure the incidents code trigger is working."
-                    )
+            code = (inc.code or "").strip()
+            if not code:
+                errors.append(f"Incident {inc.id} has empty code (trigger not applied?).")
+                continue
 
-                template_key = inc.incident_type_code
-                storage_path = GenerateDocumentsRepo.get_active_template_storage_path(
+            template_key = inc.incident_type_code.strip()
+            if not template_key:
+                errors.append(f"{code}: incident_type_code is empty.")
+                continue
+
+            required = REQUIRED_FIELDS.get(template_key)
+            if not required:
+                errors.append(
+                    f"{code}: no REQUIRED_FIELDS configured for template_key '{template_key}'."
+                )
+                continue
+
+            cache_key = (inc.company_client_id, template_key)
+
+            # Get active template (storage_path + version)
+            if cache_key not in active_template_cache:
+                active = GenerateDocumentsRepo.get_active_template(
                     company_client_id=inc.company_client_id,
                     template_key=template_key,
                 )
-                if not storage_path:
-                    raise RuntimeError(
-                        f"No active template found for client '{inc.company_client_name}' "
-                        f"and template '{template_key}'."
+                if not active:
+                    errors.append(
+                        f"{code}: missing ACTIVE template for client '{inc.company_client_name}' ({template_key})."
                     )
+                    continue
+                active_template_cache[cache_key] = (active["storage_path"], active["version"])
 
-                template_bytes = GenerateDocumentsRepo.download_template_bytes(storage_path)
+            storage_path, template_version = active_template_cache[cache_key]
+
+            # Check duplicate (already generated)
+            try:
+                exists = GeneratedDocumentsRepo.exists_for_incident(
+                    incident_id=inc.id,
+                    template_key=template_key,
+                    template_version=template_version,
+                )
+                if exists:
+                    already_generated.append(code)
+                    # We do NOT treat as error; we skip later.
+            except Exception as e:
+                errors.append(f"{code}: failed duplicate-check against generated_documents: {e}")
+                continue
+
+            # Download template bytes once per client+key
+            if cache_key not in template_cache:
+                try:
+                    template_cache[cache_key] = GenerateDocumentsRepo.download_template_bytes(
+                        storage_path
+                    )
+                except Exception as e:
+                    errors.append(f"{code}: failed to download template ({template_key}): {e}")
+                    continue
+
+            # Validate placeholders exist in template
+            try:
+                assert_required_placeholders(template_cache[cache_key], required)
+            except Exception as e:
+                errors.append(f"{code}: template '{template_key}' missing placeholders: {e}")
+
+        if errors:
+            msg = "Generation stopped. Fix these issues first:\n\n- " + "\n- ".join(errors[:14])
+            if len(errors) > 14:
+                msg += "\n- ... (more)"
+            QMessageBox.critical(self, "Cannot generate", msg)
+            return
+
+        # If everything is already generated, tell user and stop
+        # (still ALL-OR-NOTHING: nothing new to generate)
+        # NOTE: We check this by computing which ones we would generate.
+        to_generate: List[IncidentForDoc] = []
+        for inc in incidents:
+            template_key = inc.incident_type_code.strip()
+            ck = (inc.company_client_id, template_key)
+            _, template_version = active_template_cache[ck]
+
+            if not GeneratedDocumentsRepo.exists_for_incident(
+                incident_id=inc.id,
+                template_key=template_key,
+                template_version=template_version,
+            ):
+                to_generate.append(inc)
+
+        if not to_generate:
+            QMessageBox.information(
+                self,
+                "Nothing to do",
+                "All documents for the selected range were already generated for the current active template versions.",
+            )
+            return
+
+        # Optional: warn user that some were skipped (not an error)
+        if already_generated:
+            # Keep it short
+            QMessageBox.information(
+                self,
+                "Some already generated",
+                f"{len(already_generated)} incident(s) already have generated documents for the active template versions and will be skipped.",
+            )
+
+        # -------------------------
+        # GENERATE (safe to proceed)
+        # -------------------------
+        generated = 0
+        db_written = 0
+
+        try:
+            for inc in to_generate:
+                template_key = inc.incident_type_code.strip()
+                cache_key = (inc.company_client_id, template_key)
+
+                template_bytes = template_cache[cache_key]
+                storage_path, template_version = active_template_cache[cache_key]
 
                 ctx = DocContext(
                     today=today,
@@ -194,19 +322,28 @@ class GenerateDocumentsPage(QWidget):
                     incident_type_code=inc.incident_type_code,
                 )
 
-                save_bytes(self._output_folder, filename, out_bytes)
+                out_path = save_bytes(self._output_folder, filename, out_bytes)
                 generated += 1
 
-            except Exception as e:
-                failures.append(f"{inc.code or inc.id}: {e}")
+                # record it
+                GeneratedDocumentsRepo.create(
+                    company_client_id=inc.company_client_id,
+                    incident_id=inc.id,
+                    template_key=template_key,
+                    template_version=template_version,
+                    output_path=out_path,
+                )
+                db_written += 1
 
-        if failures:
-            msg = (
-                f"Generated {generated} document(s).\n\n"
-                f"Failures ({len(failures)}):\n- " + "\n- ".join(failures[:12])
-            )
-            if len(failures) > 12:
-                msg += "\n- ... (more)"
-            QMessageBox.warning(self, "Done (with issues)", msg)
-        else:
-            QMessageBox.information(self, "Done", f"Generated {generated} document(s).")
+        except Exception as e:
+            QMessageBox.critical(self, "Generation failed", str(e))
+            return
+
+        QMessageBox.information(
+            self,
+            "Done",
+            f"Generated {generated} document(s).\nRecorded {db_written} row(s) in generated_documents.",
+        )
+        
+    def reload_clients(self) -> None:
+        self._load_clients()

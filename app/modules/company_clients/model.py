@@ -9,7 +9,6 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
 )
 
-
 IndexLike = Union[QModelIndex, QPersistentModelIndex]
 
 
@@ -47,16 +46,20 @@ class CompanyClientsTableModel(QAbstractTableModel):
         if not index.isValid() or role != int(Qt.ItemDataRole.DisplayRole):
             return None
 
-        row = self._rows[index.row()]
-        col = index.column()
+        r = index.row()
+        c = index.column()
+        if r < 0 or r >= len(self._rows):
+            return None
 
-        if col == 0:
+        row = self._rows[r]
+
+        if c == 0:
             return row["name"]
-        if col == 1:
+        if c == 1:
             return row["legal_id"]
-        if col == 2:
+        if c == 2:
             return row.get("description") or ""
-        if col == 3:
+        if c == 3:
             return row["created_at"]
 
         return None
@@ -73,4 +76,11 @@ class CompanyClientsTableModel(QAbstractTableModel):
         return None
 
     def client_id_at(self, row: int) -> str:
+        if row < 0 or row >= len(self._rows):
+            return ""
         return self._rows[row]["id"]
+
+    def client_name_at(self, row: int) -> str:
+        if row < 0 or row >= len(self._rows):
+            return ""
+        return self._rows[row]["name"]

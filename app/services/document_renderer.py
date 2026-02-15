@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Iterable, Set
 
 from docx import Document
 
@@ -27,7 +27,6 @@ SPANISH_MONTHS = {
 
 
 def format_spanish_long(d: date) -> str:
-    # Example: 20 de febrero de 2026
     return f"{d.day} de {SPANISH_MONTHS[d.month]} de {d.year}"
 
 
@@ -42,10 +41,6 @@ def safe_filename(name: str) -> str:
 
 
 def _replace_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
-    """
-    Reliable placeholder replacement even when {{placeholders}} are split across runs.
-    Tradeoff: replaced segments may lose some run-level styling.
-    """
     text = paragraph.text
     new_text = text
     for k, v in mapping.items():
@@ -54,11 +49,9 @@ def _replace_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
     if new_text == text:
         return
 
-    # Clear runs
     for run in paragraph.runs:
         run.text = ""
 
-    # Put everything in first run
     if paragraph.runs:
         paragraph.runs[0].text = new_text
     else:
@@ -66,16 +59,48 @@ def _replace_in_paragraph(paragraph, mapping: Dict[str, str]) -> None:
 
 
 def replace_placeholders(doc: Document, mapping: Dict[str, str]) -> None:
-    # Paragraphs
     for p in doc.paragraphs:
         _replace_in_paragraph(p, mapping)
 
-    # Tables
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
                     _replace_in_paragraph(p, mapping)
+
+
+def _collect_all_text(doc: Document) -> str:
+    parts = [p.text for p in doc.paragraphs]
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    parts.append(p.text)
+
+    return "\n".join(parts)
+
+
+_placeholder_re = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+
+
+def find_placeholders_in_template(template_bytes: bytes) -> Set[str]:
+    doc = Document(BytesIO(template_bytes))
+    text = _collect_all_text(doc)
+    return set(_placeholder_re.findall(text))
+
+
+def assert_required_placeholders(
+    template_bytes: bytes,
+    required: Iterable[str],
+) -> None:
+    found = find_placeholders_in_template(template_bytes)
+    missing = [r for r in required if r not in found]
+    if missing:
+        raise RuntimeError(
+            "Template missing required placeholders: "
+            + ", ".join(f"{{{{{m}}}}}" for m in missing)
+        )
 
 
 @dataclass(frozen=True)
@@ -113,7 +138,10 @@ def build_output_filename(
     worker_national_id: str,
     incident_type_code: str,
 ) -> str:
-    base = f"{company_client_name}__{incident_type_code}__{code}__{worker_full_name}__{worker_national_id}.docx"
+    base = (
+        f"{company_client_name}__{incident_type_code}__{code}__"
+        f"{worker_full_name}__{worker_national_id}.docx"
+    )
     return safe_filename(base)
 
 

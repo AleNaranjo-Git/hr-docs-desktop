@@ -57,14 +57,15 @@ class ReportsPage(QWidget):
 
         layout.addLayout(filters)
 
-        hint = QLabel("Exports an Excel report with multiple sheets based on received_day.")
-        hint.setStyleSheet("color: #666;")
-        layout.addWidget(hint)
+        self.hint = QLabel("Exports an Excel report with multiple sheets based on received_day.")
+        self.hint.setStyleSheet("color: #666;")
+        layout.addWidget(self.hint)
 
         layout.addStretch(1)
 
         self._load_clients()
         self._set_default_dates()
+        self._apply_ui_state()
 
     def _setup_searchable_combo(self, combo: QComboBox) -> None:
         combo.setEditable(True)
@@ -77,7 +78,14 @@ class ReportsPage(QWidget):
         combo.setCompleter(completer)
 
     def _load_clients(self) -> None:
-        clients = ReportsRepo.list_company_clients_options()
+        try:
+            clients = ReportsRepo.list_company_clients_options()
+        except Exception as e:
+            # No crash: just disable export and show hint
+            self.client_filter.clear()
+            self.client_filter.addItem("All", "")
+            self.hint.setText(f"Could not load clients: {e}")
+            return
 
         self.client_filter.blockSignals(True)
         self.client_filter.clear()
@@ -87,57 +95,82 @@ class ReportsPage(QWidget):
         self.client_filter.setCurrentIndex(0)
         self.client_filter.blockSignals(False)
 
+        if len(clients) == 0:
+            self.hint.setText("No clients found. Add a client first to generate reports.")
+
     def _set_default_dates(self) -> None:
         today = date.today()
         first = date(today.year, today.month, 1)
-
         self.date_from.setDate(first)
         self.date_to.setDate(today)
 
+    def _apply_ui_state(self) -> None:
+        # if only "All" exists, you still can export, but it will show "no incidents" later.
+        # If clients couldn't load, hint was set and export can be disabled by content check.
+        self.export_btn.setEnabled(True)
+
     def _on_export(self) -> None:
-        client_id = self.client_filter.currentData()
-        if not isinstance(client_id, str):
-            client_id = ""
-        client_id = client_id.strip() or None
-
-        d_from = self.date_from.date().toPython()
-        d_to = self.date_to.date().toPython()
-
-        if d_from > d_to:
-            QMessageBox.warning(self, "Error", "From date must be <= To date.")
-            return
-
-        # Pull data
-        rows = ReportsRepo.list_incidents_for_reports(
-            date_from=d_from,
-            date_to=d_to,
-            company_client_id=client_id,
-        )
-
-        if client_id:
-            client_name_ui = self.client_filter.currentText().strip() or "Cliente"
-            client_name_es = client_name_ui
-        else:
-            client_name_es = "Todos"
-
-        suggested = f"reporte_incidencias_{d_from.isoformat()}_a_{d_to.isoformat()}.xlsx"
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Report",
-            suggested,
-            "Excel Workbook (*.xlsx)",
-        )
-        if not path:
-            return
-
+        self.export_btn.setEnabled(False)
         try:
-            wb = ReportsExcelExporter.build_workbook(
-                incidents=rows,
-                meta=ReportsMetadata(date_from=d_from, date_to=d_to, client_name=client_name_es),
-            )
-            wb.save(path)
-        except Exception as e:
-            QMessageBox.critical(self, "Export failed", str(e))
-            return
+            client_id = self.client_filter.currentData()
+            if not isinstance(client_id, str):
+                client_id = ""
+            client_id = client_id.strip() or None
 
-        QMessageBox.information(self, "Done", "Report exported successfully.")
+            d_from = self.date_from.date().toPython()
+            d_to = self.date_to.date().toPython()
+
+            if d_from > d_to:
+                QMessageBox.warning(self, "Error", "From date must be <= To date.")
+                return
+
+            # Pull data
+            try:
+                rows = ReportsRepo.list_incidents_for_reports(
+                    date_from=d_from,
+                    date_to=d_to,
+                    company_client_id=client_id,
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load incidents.\n\n{e}")
+                return
+
+            if not rows:
+                QMessageBox.information(self, "No data", "No incidents found for the selected filters.")
+                return
+
+            if client_id:
+                client_name_ui = self.client_filter.currentText().strip() or "Cliente"
+                client_name_es = client_name_ui
+            else:
+                client_name_es = "Todos"
+
+            suggested = f"reporte_incidencias_{d_from.isoformat()}_a_{d_to.isoformat()}.xlsx"
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Report",
+                suggested,
+                "Excel Workbook (*.xlsx)",
+            )
+            if not path:
+                return
+
+            if not path.lower().endswith(".xlsx"):
+                path = path + ".xlsx"
+
+            try:
+                wb = ReportsExcelExporter.build_workbook(
+                    incidents=rows,
+                    meta=ReportsMetadata(date_from=d_from, date_to=d_to, client_name=client_name_es),
+                )
+                wb.save(path)
+            except Exception as e:
+                QMessageBox.critical(self, "Export failed", str(e))
+                return
+
+            QMessageBox.information(self, "Done", "Report exported successfully.")
+        finally:
+            self.export_btn.setEnabled(True)
+            
+    def reload_clients(self) -> None:
+        self._load_clients()
