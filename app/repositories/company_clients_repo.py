@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict, cast, Any
+from typing import TypedDict, Any, List
 
 from app.db.supabase_client import get_supabase
 from app.core.session import AppSession
@@ -16,7 +16,7 @@ class CompanyClientRow(TypedDict):
 
 class CompanyClientsRepo:
     @staticmethod
-    def list_active() -> list[CompanyClientRow]:
+    def list_active() -> List[CompanyClientRow]:
         sb = get_supabase()
         firm_id: str = AppSession.require().firm_id
 
@@ -29,7 +29,14 @@ class CompanyClientsRepo:
             .execute()
         )
 
-        return cast(list[CompanyClientRow], resp.data or [])
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to load clients: {resp.error}")
+
+        data = resp.data or []
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected response while loading clients.")
+
+        return data
 
     @staticmethod
     def create(name: str, legal_id: str, description: str | None) -> None:
@@ -43,13 +50,23 @@ class CompanyClientsRepo:
             "description": description,
         }
 
-        sb.table("company_clients").insert(payload).execute()
+        resp = sb.table("company_clients").insert(payload).execute()
+
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to create client: {resp.error}")
 
     @staticmethod
     def deactivate(client_id: str) -> None:
         sb = get_supabase()
         firm_id: str = AppSession.require().firm_id
 
-        sb.table("company_clients").update(
-            {"is_active": False}
-        ).eq("id", client_id).eq("firm_id", firm_id).execute()
+        resp = (
+            sb.table("company_clients")
+            .update({"is_active": False})
+            .eq("id", client_id)
+            .eq("firm_id", firm_id)
+            .execute()
+        )
+
+        if hasattr(resp, "error") and resp.error:
+            raise RuntimeError(f"Failed to deactivate client: {resp.error}")
