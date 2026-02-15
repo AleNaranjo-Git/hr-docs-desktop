@@ -201,6 +201,20 @@ class DocumentTemplatesRepo:
         # 1) Upload to storage
         DocumentTemplatesRepo._upload_docx_to_storage(storage_path, local_file_path)
 
+        print("firm_id", firm_id)
+        print("company_client_id", company_client_id)
+        print("template_key", template_key)
+        existing = (
+            sb.table("document_templates")
+            .select("id, firm_id, company_client_id, template_key, version, is_active")
+            .eq("firm_id", firm_id)
+            .eq("company_client_id", company_client_id)
+            .eq("template_key", template_key)
+            .eq("is_active", True)
+            .execute()
+        )
+        print("existing active:", existing.data)
+
         # 2) Deactivate previous active (recommended)
         sb.table("document_templates").update(
             {"is_active": False}

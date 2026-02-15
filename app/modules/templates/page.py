@@ -97,6 +97,22 @@ class TemplatesPage(QWidget):
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         combo.setCompleter(completer)
 
+        def apply_text_to_selection() -> None:
+            text = combo.currentText().strip()
+            if not text:
+                combo.setCurrentIndex(-1)
+                return
+
+            idx = combo.findText(text, Qt.MatchFlag.MatchFixedString)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                combo.setCurrentIndex(-1)
+
+        completer.activated.connect(lambda _: apply_text_to_selection())
+        if combo.lineEdit():
+            combo.lineEdit().editingFinished.connect(apply_text_to_selection)
+
     def _load_clients(self) -> None:
         clients = DocumentTemplatesRepo.list_company_clients_options()
 
@@ -183,6 +199,10 @@ class TemplatesPage(QWidget):
 
         if not self._selected_file or not self._selected_file.lower().endswith(".docx"):
             QMessageBox.warning(self, "Error", "Please choose a .docx file.")
+            return
+        
+        if self.client_select.currentIndex() < 0:
+            QMessageBox.warning(self, "Error", "Pick a client from the list (typed text must match).")
             return
 
         try:
