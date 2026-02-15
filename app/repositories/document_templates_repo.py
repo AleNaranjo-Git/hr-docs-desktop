@@ -53,16 +53,9 @@ class DocumentTemplatesRepo:
 
         data = resp.data or []
         out: List[CompanyClientOption] = []
-
         for r in data:
             if isinstance(r, dict):
-                out.append(
-                    {
-                        "id": str(r.get("id", "")),
-                        "name": str(r.get("name", "")),
-                    }
-                )
-
+                out.append({"id": str(r.get("id", "")), "name": str(r.get("name", ""))})
         return out
 
     @staticmethod
@@ -78,7 +71,6 @@ class DocumentTemplatesRepo:
 
         data = resp.data or []
         out: List[IncidentTypeOption] = []
-
         for r in data:
             if isinstance(r, dict):
                 out.append(
@@ -88,7 +80,6 @@ class DocumentTemplatesRepo:
                         "name": str(r.get("name", "")),
                     }
                 )
-
         return out
 
     @staticmethod
@@ -174,6 +165,7 @@ class DocumentTemplatesRepo:
         storage = sb.storage.from_(bucket)
         content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+        # Important: "upsert" must be string in file_options for supabase-py
         try:
             storage.upload(
                 path=storage_path,
@@ -201,21 +193,7 @@ class DocumentTemplatesRepo:
         # 1) Upload to storage
         DocumentTemplatesRepo._upload_docx_to_storage(storage_path, local_file_path)
 
-        print("firm_id", firm_id)
-        print("company_client_id", company_client_id)
-        print("template_key", template_key)
-        existing = (
-            sb.table("document_templates")
-            .select("id, firm_id, company_client_id, template_key, version, is_active")
-            .eq("firm_id", firm_id)
-            .eq("company_client_id", company_client_id)
-            .eq("template_key", template_key)
-            .eq("is_active", True)
-            .execute()
-        )
-        print("existing active:", existing.data)
-
-        # 2) Deactivate previous active (recommended)
+        # 2) Deactivate previous active
         sb.table("document_templates").update(
             {"is_active": False}
         ).eq("firm_id", firm_id).eq("company_client_id", company_client_id).eq(

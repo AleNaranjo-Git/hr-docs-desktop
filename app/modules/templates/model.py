@@ -29,7 +29,11 @@ class TemplatesTableModel(QAbstractTableModel):
         if not index.isValid() or role != int(Qt.ItemDataRole.DisplayRole):
             return None
 
-        row = self._rows[index.row()]
+        r = index.row()
+        if r < 0 or r >= len(self._rows):
+            return None
+
+        row = self._rows[r]
         col = index.column()
 
         if col == 0:
@@ -47,8 +51,11 @@ class TemplatesTableModel(QAbstractTableModel):
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = int(Qt.ItemDataRole.DisplayRole)):
         if role == int(Qt.ItemDataRole.DisplayRole) and orientation == Qt.Orientation.Horizontal:
-            return self.HEADERS[section]
+            if 0 <= section < len(self.HEADERS):
+                return self.HEADERS[section]
         return None
 
     def template_id_at(self, row: int) -> str:
+        if row < 0 or row >= len(self._rows):
+            return ""
         return self._rows[row]["id"]
