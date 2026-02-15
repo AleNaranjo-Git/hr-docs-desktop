@@ -17,6 +17,11 @@ class CompanyClientOption(TypedDict):
     name: str
 
 
+class ActiveTemplate(TypedDict):
+    storage_path: str
+    version: int
+
+
 @dataclass(frozen=True)
 class IncidentForDoc:
     id: str
@@ -142,17 +147,17 @@ class GenerateDocumentsRepo:
         return out
 
     @staticmethod
-    def get_active_template_storage_path(
+    def get_active_template(
         *,
         company_client_id: str,
         template_key: str,
-    ) -> Optional[str]:
+    ) -> Optional[ActiveTemplate]:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
         resp = (
             sb.table("document_templates")
-            .select("storage_path")
+            .select("storage_path, version")
             .eq("firm_id", firm_id)
             .eq("company_client_id", company_client_id)
             .eq("template_key", template_key)
@@ -166,7 +171,13 @@ class GenerateDocumentsRepo:
         if not rows or not isinstance(rows[0], dict):
             return None
 
-        return str(rows[0].get("storage_path", "")) or None
+        storage_path = str(rows[0].get("storage_path", "") or "")
+        version = int(rows[0].get("version", 0) or 0)
+
+        if not storage_path or version <= 0:
+            return None
+
+        return {"storage_path": storage_path, "version": version}
 
     @staticmethod
     def download_template_bytes(storage_path: str) -> bytes:
