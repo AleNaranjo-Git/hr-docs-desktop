@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QCompleter,
 )
 
+from app.core.events import events
 from app.repositories.workers_repo import WorkersRepo
 from app.modules.workers.model import WorkersTableModel, WorkerRow
 
@@ -73,9 +74,13 @@ class WorkersPage(QWidget):
         self.model = WorkersTableModel()
         self.table.setModel(self.model)
         self.table.doubleClicked.connect(self._on_deactivate)
-
         layout.addWidget(self.table)
 
+        # ---- Subscribe to global events ----
+        events().company_clients_changed.connect(self._on_company_clients_changed)
+        events().workers_changed.connect(self._on_workers_changed)
+
+        # ---- Initial load ----
         self._load_clients()
         self._apply_filter_to_form()
         self.refresh()
@@ -87,11 +92,13 @@ class WorkersPage(QWidget):
     def _apply_ui_state(self) -> None:
         has_clients = self.client_select.count() > 0
 
-        self.client_filter.setEnabled(has_clients or self.client_filter.count() > 0)
-        self.client_select.setEnabled(has_clients and self.client_select.isEnabled())
+        # Enable/disable form controls based on whether clients exist
         self.full_name_input.setEnabled(has_clients)
         self.national_id_input.setEnabled(has_clients)
         self.save_btn.setEnabled(has_clients)
+
+        # Filter combo should always be enabled (it includes "All") once loaded
+        self.client_filter.setEnabled(self.client_filter.count() > 0)
 
         if not has_clients:
             self._set_hint("No clients found. Add a client first before creating workers.")
@@ -108,13 +115,12 @@ class WorkersPage(QWidget):
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
         combo.setCompleter(completer)
 
-        # Hardening: typed text must match an item
+        # Typed text must match an item
         def apply_text_to_selection() -> None:
             text = combo.currentText().strip()
             if not text:
                 combo.setCurrentIndex(-1)
                 return
-
             idx = combo.findText(text, Qt.MatchFlag.MatchFixedString)
             combo.setCurrentIndex(idx if idx >= 0 else -1)
 
@@ -126,10 +132,14 @@ class WorkersPage(QWidget):
         try:
             clients = WorkersRepo.list_company_clients_options()
         except Exception as e:
+            self.client_filter.blockSignals(True)
             self.client_filter.clear()
             self.client_filter.addItem("All", "")
+            self.client_filter.blockSignals(False)
+
             self.client_select.clear()
             self._set_hint(f"Could not load clients: {e}")
+            self._apply_ui_state()
             return
 
         # Filter combo (includes "All")
@@ -149,6 +159,9 @@ class WorkersPage(QWidget):
         self.client_select.setCurrentIndex(0 if self.client_select.count() > 0 else -1)
         self.client_select.blockSignals(False)
 
+        self._apply_filter_to_form()
+        self._apply_ui_state()
+
     def _on_filter_changed(self) -> None:
         self._apply_filter_to_form()
         self.refresh()
@@ -160,10 +173,13 @@ class WorkersPage(QWidget):
         return ""
 
     def _apply_filter_to_form(self) -> None:
+        """
+        If filter = All -> allow choosing company client for new worker.
+        If filter = specific client -> lock form to that same client.
+        """
         selected_client_id = self._selected_filter_client_id()
 
         if not selected_client_id:
-            # All
             self.client_select.setEnabled(True)
             return
 
@@ -194,7 +210,6 @@ class WorkersPage(QWidget):
             QMessageBox.warning(self, "Error", "No clients exist yet. Create a client first.")
             return
 
-        # If user typed something and it doesn't match, currentIndex becomes -1
         if self.client_select.currentIndex() < 0:
             QMessageBox.warning(self, "Error", "Pick a company client from the list (typed text must match).")
             return
@@ -226,6 +241,8 @@ class WorkersPage(QWidget):
 
         self.full_name_input.clear()
         self.national_id_input.clear()
+
+        events().workers_changed.emit()
         self.refresh()
 
     def _on_deactivate(self, index: QModelIndex) -> None:
@@ -234,20 +251,30 @@ class WorkersPage(QWidget):
         if not worker_id:
             return
 
-        confirm = QMessageBox.question(
-            self,
-            "Deactivate",
-            "Deactivate this worker?",
-        )
+        confirm = QMessageBox.question(self, "Deactivate", "Deactivate this worker?")
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
 
-        if confirm == QMessageBox.StandardButton.Yes:
-            try:
-                WorkersRepo.deactivate(worker_id)
-            except Exception as e:
-                QMessageBox.critical(self, "Error", str(e))
-                return
-            self.refresh()
-            
+        try:
+            WorkersRepo.deactivate(worker_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+            return
+
+        events().workers_changed.emit()
+        self.refresh()
+
+    # ---- Event handlers ----
+    def _on_company_clients_changed(self) -> None:
+        # Client created elsewhere -> reload combos and update hint/buttons
+        self._load_clients()
+        self.refresh()
+        self._apply_ui_state()
+
+    def _on_workers_changed(self) -> None:
+        self.refresh()
+
+    # Optional explicit calls
     def reload_clients(self) -> None:
         self._load_clients()
         self._apply_filter_to_form()
