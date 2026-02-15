@@ -40,12 +40,7 @@ class WorkersRepo:
 
         for r in data:
             if isinstance(r, dict):
-                out.append(
-                    {
-                        "id": str(r.get("id", "")),
-                        "name": str(r.get("name", "")),
-                    }
-                )
+                out.append({"id": str(r.get("id", "")), "name": str(r.get("name", ""))})
 
         return out
 
@@ -56,9 +51,7 @@ class WorkersRepo:
 
         query = (
             sb.table("workers")
-            .select(
-                "id, full_name, national_id, company_client_id, created_at, company_clients(name)"
-            )
+            .select("id, full_name, national_id, company_client_id, created_at, company_clients(name)")
             .eq("firm_id", firm_id)
             .eq("is_active", True)
             .order("created_at", desc=True)
@@ -78,16 +71,16 @@ class WorkersRepo:
             embedded = r.get("company_clients")
             client_name = ""
             if isinstance(embedded, dict):
-                client_name = str(embedded.get("name", ""))
+                client_name = str(embedded.get("name", "") or "")
 
             out.append(
                 {
-                    "id": str(r.get("id", "")),
-                    "full_name": str(r.get("full_name", "")),
-                    "national_id": str(r.get("national_id", "")),
-                    "company_client_id": str(r.get("company_client_id", "")),
+                    "id": str(r.get("id", "") or ""),
+                    "full_name": str(r.get("full_name", "") or ""),
+                    "national_id": str(r.get("national_id", "") or ""),
+                    "company_client_id": str(r.get("company_client_id", "") or ""),
                     "company_client_name": client_name,
-                    "created_at": str(r.get("created_at", "")),
+                    "created_at": str(r.get("created_at", "") or ""),
                 }
             )
 
@@ -112,6 +105,4 @@ class WorkersRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        sb.table("workers").update({"is_active": False}).eq("id", worker_id).eq(
-            "firm_id", firm_id
-        ).execute()
+        sb.table("workers").update({"is_active": False}).eq("id", worker_id).eq("firm_id", firm_id).execute()
