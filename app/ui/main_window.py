@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from app.db.auth_service import sign_out
 from app.modules.company_clients.page import CompanyClientsPage
 from app.modules.workers.page import WorkersPage
+from app.modules.incidents.page import IncidentsPage
 
 
 class Sidebar(QWidget):
@@ -35,8 +36,10 @@ class Sidebar(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(title)
 
+        # Route key -> Button label
         self.menu_items = [
             ("add_client", "Add Client"),
+            ("add_template", "Add Template"),
             ("add_worker", "Add Worker"),
             ("incidents", "Incidents"),
             ("reports", "Reports"),
@@ -129,8 +132,9 @@ class MainWindow(QMainWindow):
 
     def _build_pages(self) -> None:
         self._add_page("add_client", CompanyClientsPage())
+        self._add_page("add_template", PlaceholderPage("Add Template"))
         self._add_page("add_worker", WorkersPage())
-        self._add_page("incidents", PlaceholderPage("Incidents"))
+        self._add_page("incidents", IncidentsPage())
         self._add_page("reports", PlaceholderPage("Reports"))
 
     def _add_page(self, key: str, page: QWidget) -> None:
