@@ -296,6 +296,9 @@ class GenerateDocumentsPage(QWidget):
         generated = 0
         db_written = 0
 
+        doc_prefix = "UD"
+        doc_year = today.year
+
         try:
             for inc in to_generate:
                 template_key = inc.incident_type_code.strip()
@@ -314,36 +317,45 @@ class GenerateDocumentsPage(QWidget):
 
                 out_bytes = render_docx(template_bytes, ctx)
 
-                filename = build_output_filename(
-                    company_client_name=inc.company_client_name,
-                    code=inc.code.strip(),
-                    worker_full_name=inc.worker_full_name,
-                    worker_national_id=inc.worker_national_id,
-                    incident_type_code=inc.incident_type_code,
+                # -----------------------------
+                # Generate UD sequence
+                # -----------------------------
+                seq = GeneratedDocumentsRepo.next_doc_seq(
+                    company_client_id=inc.company_client_id,
+                    doc_prefix=doc_prefix,
+                    doc_year=doc_year,
                 )
+
+                # Normalize company name (safe for filenames)
+                client_name = inc.company_client_name.strip().upper()
+                client_name = client_name.replace(" ", "")
+                client_name = "".join(ch for ch in client_name if ch.isalnum())
+
+                doc_code = inc.code.strip()
+
+                filename = build_output_filename(doc_code=doc_code)
 
                 out_path = save_bytes(self._output_folder, filename, out_bytes)
                 generated += 1
 
-                # record it
+                # Record in DB
                 GeneratedDocumentsRepo.create(
                     company_client_id=inc.company_client_id,
                     incident_id=inc.id,
                     template_key=template_key,
                     template_version=template_version,
                     output_path=out_path,
+                    doc_prefix=doc_prefix,
+                    doc_year=doc_year,
+                    doc_seq=seq,
+                    doc_code=doc_code,
                 )
+
                 db_written += 1
 
         except Exception as e:
             QMessageBox.critical(self, "Generation failed", str(e))
             return
-
-        QMessageBox.information(
-            self,
-            "Done",
-            f"Generated {generated} document(s).\nRecorded {db_written} row(s) in generated_documents.",
-        )
         
     def reload_clients(self) -> None:
         self._load_clients()
