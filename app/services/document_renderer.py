@@ -130,19 +130,8 @@ def render_docx(template_bytes: bytes, ctx: DocContext) -> bytes:
     return buf.getvalue()
 
 
-def build_output_filename(
-    *,
-    company_client_name: str,
-    code: str,
-    worker_full_name: str,
-    worker_national_id: str,
-    incident_type_code: str,
-) -> str:
-    base = (
-        f"{company_client_name}__{incident_type_code}__{code}__"
-        f"{worker_full_name}__{worker_national_id}.docx"
-    )
-    return safe_filename(base)
+def build_output_filename(*, doc_code: str, **_) -> str:
+    return safe_filename(f"{doc_code}.docx")
 
 
 def save_bytes(folder: str, filename: str, content: bytes) -> str:
