@@ -6,10 +6,12 @@ from app.core.session import AppSession
 from app.db.supabase_client import get_supabase
 from app.core.events import events
 
+
 class WorkerRow(TypedDict):
     id: str
     full_name: str
     national_id: str
+    email: str
     company_client_id: str
     company_client_name: str
     created_at: str
@@ -51,7 +53,7 @@ class WorkersRepo:
 
         query = (
             sb.table("workers")
-            .select("id, full_name, national_id, company_client_id, created_at, company_clients(name)")
+            .select("id, full_name, national_id, email, company_client_id, created_at, company_clients(name)")
             .eq("firm_id", firm_id)
             .eq("is_active", True)
             .order("created_at", desc=True)
@@ -78,6 +80,7 @@ class WorkersRepo:
                     "id": str(r.get("id", "") or ""),
                     "full_name": str(r.get("full_name", "") or ""),
                     "national_id": str(r.get("national_id", "") or ""),
+                    "email": str(r.get("email", "") or ""),
                     "company_client_id": str(r.get("company_client_id", "") or ""),
                     "company_client_name": client_name,
                     "created_at": str(r.get("created_at", "") or ""),
@@ -87,7 +90,12 @@ class WorkersRepo:
         return out
 
     @staticmethod
-    def create(company_client_id: str, full_name: str, national_id: str) -> None:
+    def create(
+        company_client_id: str,
+        full_name: str,
+        national_id: str,
+        email: Optional[str],
+    ) -> None:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
@@ -96,10 +104,10 @@ class WorkersRepo:
             "company_client_id": company_client_id,
             "full_name": full_name,
             "national_id": national_id,
+            "email": (email or "").strip() or None,
         }
 
         sb.table("workers").insert(payload).execute()
-        
         events().workers_changed.emit()
 
     @staticmethod
@@ -108,5 +116,4 @@ class WorkersRepo:
         firm_id = AppSession.require().firm_id
 
         sb.table("workers").update({"is_active": False}).eq("id", worker_id).eq("firm_id", firm_id).execute()
-        
         events().workers_changed.emit()
