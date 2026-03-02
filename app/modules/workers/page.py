@@ -59,12 +59,16 @@ class WorkersPage(QWidget):
         self.national_id_input = QLineEdit()
         self.national_id_input.setPlaceholderText("National ID")
 
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("Email (optional)")
+
         self.save_btn = QPushButton("Add Worker")
         self.save_btn.clicked.connect(self._on_add)
 
         form.addWidget(self.client_select)
         form.addWidget(self.full_name_input)
         form.addWidget(self.national_id_input)
+        form.addWidget(self.email_input)
         form.addWidget(self.save_btn)
 
         layout.addLayout(form)
@@ -95,6 +99,7 @@ class WorkersPage(QWidget):
         # Enable/disable form controls based on whether clients exist
         self.full_name_input.setEnabled(has_clients)
         self.national_id_input.setEnabled(has_clients)
+        self.email_input.setEnabled(has_clients)
         self.save_btn.setEnabled(has_clients)
 
         # Filter combo should always be enabled (it includes "All") once loaded
@@ -221,6 +226,7 @@ class WorkersPage(QWidget):
 
         full_name = self.full_name_input.text().strip()
         national_id = self.national_id_input.text().strip()
+        email = self.email_input.text().strip() or None
 
         if not full_name or not national_id:
             QMessageBox.warning(self, "Error", "Full name and National ID are required.")
@@ -232,6 +238,7 @@ class WorkersPage(QWidget):
                 company_client_id=company_client_id,
                 full_name=full_name,
                 national_id=national_id,
+                email=email,
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -241,6 +248,7 @@ class WorkersPage(QWidget):
 
         self.full_name_input.clear()
         self.national_id_input.clear()
+        self.email_input.clear()
 
         events().workers_changed.emit()
         self.refresh()

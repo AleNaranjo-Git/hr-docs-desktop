@@ -1,3 +1,5 @@
+# app/modules/workers/model.py
+
 from __future__ import annotations
 
 from typing import List, TypedDict
@@ -9,13 +11,14 @@ class WorkerRow(TypedDict):
     id: str
     full_name: str
     national_id: str
+    email: str
     company_client_id: str
     company_client_name: str
     created_at: str
 
 
 class WorkersTableModel(QAbstractTableModel):
-    HEADERS = ["Worker", "National ID", "Company Client", "Created At"]
+    HEADERS = ["Worker", "National ID", "Email", "Company Client", "Created At"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -48,8 +51,10 @@ class WorkersTableModel(QAbstractTableModel):
         if col == 1:
             return row["national_id"]
         if col == 2:
-            return row["company_client_name"]
+            return row.get("email", "")
         if col == 3:
+            return row["company_client_name"]
+        if col == 4:
             return row["created_at"]
         return None
 
