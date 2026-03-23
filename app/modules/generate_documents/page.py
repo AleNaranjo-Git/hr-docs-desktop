@@ -311,6 +311,7 @@ class GenerateDocumentsPage(QWidget):
                     today=today,
                     code=inc.code.strip(),
                     worker_name_upper=inc.worker_full_name.strip().upper(),
+                    worker_national_id=inc.worker_national_id.strip(),
                     incident_date=inc.incident_date,
                     observations=inc.observations or "",
                 )

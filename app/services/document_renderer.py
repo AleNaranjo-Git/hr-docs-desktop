@@ -108,6 +108,7 @@ class DocContext:
     today: date
     code: str
     worker_name_upper: str
+    worker_national_id: str
     incident_date: date
     observations: str
 
@@ -119,6 +120,7 @@ def render_docx(template_bytes: bytes, ctx: DocContext) -> bytes:
         "{{today}}": format_spanish_long(ctx.today),
         "{{code}}": ctx.code,
         "{{name}}": ctx.worker_name_upper,
+        "{{national_id}}": ctx.worker_national_id,
         "{{incident_date}}": format_spanish_long(ctx.incident_date),
         "{{observations}}": ctx.observations,
     }
