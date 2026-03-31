@@ -18,17 +18,17 @@ INCIDENT_TYPE_TO_FALTA_ES = {
 @dataclass(frozen=True)
 class ReportRow:
     incident_id: str
-    consecutivo: str  # incidents.code
-    fecha_consecutivo: date  # incidents.received_day
-    patrono: str  # company_clients.name
-    correo: str  # workers.email
-    colaborador: str  # workers.full_name
-    cedula: str  # workers.national_id
-    fecha_incidente: date  # incidents.incident_date
-    falta: str  # Spanish label
-    estado: str  # from incident_report_meta.status (default PENDIENTE)
-    observaciones: str  # from incident_report_meta.report_observations
-    revision: str  # computed
+    consecutivo: str
+    fecha_consecutivo: date
+    patrono: str
+    correo: str
+    colaborador: str
+    cedula: str
+    fecha_incidente: date
+    falta: str
+    estado: str
+    observaciones: str
+    revision: str
 
 
 def _parse_date_yyyy_mm_dd(value: str) -> date:
@@ -37,19 +37,12 @@ def _parse_date_yyyy_mm_dd(value: str) -> date:
 
 
 def _falta_label_from_type_code(type_code: str, type_name: str) -> str:
-    """
-    Prefer fixed mapping by code.
-    Fallback to type_name (already Spanish sometimes).
-    """
     code = (type_code or "").strip().upper()
     mapped = INCIDENT_TYPE_TO_FALTA_ES.get(code)
     if mapped:
         return mapped
-
-    # fallback: if the DB name is already Spanish, keep it (upper for consistency)
     if (type_name or "").strip():
         return (type_name or "").strip().upper()
-
     return code
 
 
@@ -80,10 +73,6 @@ class ReportsRepo:
 
     @staticmethod
     def _fetch_meta_map(incident_ids: List[str]) -> Dict[str, dict]:
-        """
-        Returns: {incident_id: {"status": str, "report_observations": str}}
-        If a row doesn't exist, caller will default to PENDIENTE / "".
-        """
         if not incident_ids:
             return {}
 
@@ -122,31 +111,21 @@ class ReportsRepo:
         status: Optional[str] = None,
         report_observations: Optional[str] = None,
     ) -> None:
-        """
-        Robust upsert:
-        - First checks if the meta row exists for (firm_id, incident_id)
-        - If exists -> UPDATE
-        - Else -> INSERT
-        This avoids 23505 duplicate issues if upsert/on_conflict behavior differs by client lib version.
-        """
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
         if not incident_id or not incident_id.strip():
             raise ValueError("incident_id is required")
 
-        # Build patch (only send changed fields)
         patch: Dict[str, object] = {}
         if status is not None:
             patch["status"] = status
         if report_observations is not None:
             patch["report_observations"] = report_observations
 
-        # Nothing to update
         if not patch:
             return
 
-        # 1) Check existence
         check = (
             sb.table("incident_report_meta")
             .select("incident_id")
@@ -162,7 +141,6 @@ class ReportsRepo:
         exists = bool(check.data) and isinstance(check.data, list) and len(check.data) > 0
 
         if exists:
-            # 2a) UPDATE
             resp = (
                 sb.table("incident_report_meta")
                 .update(patch)
@@ -174,7 +152,6 @@ class ReportsRepo:
                 raise RuntimeError(resp.error)
             return
 
-        # 2b) INSERT
         payload = {"firm_id": firm_id, "incident_id": incident_id, **patch}
         resp = sb.table("incident_report_meta").insert(payload).execute()
         if hasattr(resp, "error") and resp.error:
@@ -187,11 +164,6 @@ class ReportsRepo:
         date_to: date,
         company_client_id: Optional[str],
     ) -> List[ReportRow]:
-        """
-        Pull incidents by firm + received_day range,
-        merge with incident_report_meta,
-        compute revision rules for ABSENCE within same month.
-        """
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
@@ -213,8 +185,6 @@ class ReportsRepo:
             raise RuntimeError(resp.error)
 
         data = resp.data or []
-
-        # first pass: parse rows (without meta/revision)
         temp: List[dict] = []
         incident_ids: List[str] = []
 
@@ -269,12 +239,18 @@ class ReportsRepo:
 
         meta_map = ReportsRepo._fetch_meta_map(incident_ids)
 
-        # Build helper index to compute ABSENCE review per worker per month
-        # key: (company_client_id, worker_national_id, yyyy, mm) -> sorted incident_date list for ABSENCE
         absence_by_worker_month: Dict[tuple, List[date]] = {}
         for t in temp:
+            iid = t["incident_id"]
+            meta = meta_map.get(iid, {})
+            estado = (meta.get("status") or "").strip().upper()
+
+            if estado == "ANULADO":
+                continue
+
             if (t["incident_type_code"] or "").strip().upper() != "ABSENCE":
                 continue
+
             d: date = t["fecha_incidente"]
             key = (t["company_client_id"], t["cedula"], d.year, d.month)
             absence_by_worker_month.setdefault(key, []).append(d)
@@ -283,8 +259,21 @@ class ReportsRepo:
             absence_by_worker_month[k] = sorted(absence_by_worker_month[k])
 
         def compute_revision_for_row(t: dict) -> str:
+            iid = t["incident_id"]
+            meta = meta_map.get(iid, {})
+            estado = (meta.get("status") or "").strip().upper()
+
+            if estado == "DESPEDIDO":
+                return "DESPEDIDO"
+
+            if estado == "RENUNCIO":
+                return "RENUNCIO"
+
+            if estado == "ANULADO":
+                return "ANULADO"
+
             if (t["incident_type_code"] or "").strip().upper() != "ABSENCE":
-                return ""
+                return "Revisión: Revisando"
 
             d: date = t["fecha_incidente"]
             key = (t["company_client_id"], t["cedula"], d.year, d.month)
@@ -292,9 +281,8 @@ class ReportsRepo:
             n = len(days)
 
             if n <= 1:
-                return "Tiene 1 ausencia injustificada"
+                return "1 ausencia injustificada"
 
-            # consecutive check: any pair with diff == 1 day
             has_consecutive = False
             for i in range(1, len(days)):
                 if (days[i] - days[i - 1]).days == 1:
@@ -302,19 +290,18 @@ class ReportsRepo:
                     break
 
             if has_consecutive:
-                return "Se puede despedir: 2 ausencias injustificadas seguidas"
+                return "2 ausencias seguidas, causal de despido"
 
             if n >= 3:
-                return "Se puede despedir: 3 ausencias injustificadas alternas (mismo mes)"
+                return "3 ausencias en el mes, causal de despido"
 
-            # n == 2 but not consecutive
-            return "Tiene 2 ausencias injustificadas no seguidas"
+            return "2 ausencias injustificadas no seguidas"
 
         out: List[ReportRow] = []
         for t in temp:
             iid = t["incident_id"]
             meta = meta_map.get(iid, {})
-            estado = (meta.get("status") or "").strip() or "PENDIENTE"
+            estado = (meta.get("status") or "").strip().upper() or "PENDIENTE"
             obs = meta.get("report_observations")
             if obs is None:
                 obs = ""

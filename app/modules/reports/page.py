@@ -30,11 +30,8 @@ from app.services.reports_excel_exporter import ReportsExcelExporter, ReportsMet
 class ReportsPage(QWidget):
     DEFAULT_HINT = "Muestra una tabla editable (ESTADO/OBSERVACIONES) y permite exportar exactamente lo filtrado."
 
-    # UI list (with Todos)
-    ESTADOS_UI = ["Todos", "PENDIENTE", "ENVIADO", "DESPEDIDO", "ERROR_ENVIO"]
-
-    # Values actually saved in DB
-    ESTADOS_DB = ["PENDIENTE", "ENVIADO", "DESPEDIDO", "ERROR_ENVIO"]
+    ESTADOS_UI = ["Todos", "PENDIENTE", "ENVIADO", "DESPEDIDO", "ERROR_ENVIO", "RENUNCIO", "ANULADO"]
+    ESTADOS_DB = ["PENDIENTE", "ENVIADO", "DESPEDIDO", "ERROR_ENVIO", "RENUNCIO", "ANULADO"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -45,7 +42,6 @@ class ReportsPage(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(title)
 
-        # ---- Filters row 1 ----
         row1 = QHBoxLayout()
 
         row1.addWidget(QLabel("Patrono:"))
@@ -68,7 +64,6 @@ class ReportsPage(QWidget):
 
         layout.addLayout(row1)
 
-        # ---- Filters row 2 ----
         row2 = QHBoxLayout()
 
         row2.addWidget(QLabel("Desde (received_day):"))
@@ -97,21 +92,15 @@ class ReportsPage(QWidget):
         self.hint.setStyleSheet("color: #666;")
         layout.addWidget(self.hint)
 
-        # ---- Table ----
         self.table = QTableView()
         self.model = ReportsTableModel()
         self.table.setModel(self.model)
         self.table.setSortingEnabled(True)
-
-        # IMPORTANT: allow editing on double click / click / typing
         self.table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
             | QAbstractItemView.EditTrigger.SelectedClicked
         )
-
-        # Delegate for Estado column (combo)
-        # Your ReportsTableModel must expose ESTADO_COL
         self.table.setItemDelegateForColumn(
             self.model.ESTADO_COL,
             EstadoDelegate(self.ESTADOS_DB, self.table),
@@ -119,18 +108,13 @@ class ReportsPage(QWidget):
 
         layout.addWidget(self.table, stretch=1)
 
-        # internal: full data (before status/search filters)
         self._all_rows: List[ReportRow] = []
 
         events().company_clients_changed.connect(self.reload_clients)
 
         self._set_default_dates()
         self._load_clients()
-
-        # initial load
         self.refresh()
-
-        # Refresh when dates change
         self.date_from.dateChanged.connect(self.refresh)
         self.date_to.dateChanged.connect(self.refresh)
 

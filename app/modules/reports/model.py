@@ -118,7 +118,7 @@ class ReportsTableModel(QAbstractTableModel):
             if not new_text:
                 new_text = "PENDIENTE"
 
-            allowed = {"PENDIENTE", "ENVIADO", "DESPEDIDO", "ERROR_ENVIO"}
+            allowed = {"PENDIENTE", "ENVIADO", "DESPEDIDO", "ERROR_ENVIO", "RENUNCIO", "ANULADO"}
             new_estado = new_text.upper()
             if new_estado not in allowed:
                 return False
