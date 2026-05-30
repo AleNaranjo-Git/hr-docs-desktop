@@ -56,6 +56,11 @@ class GenerateDocumentsPage(QWidget):
         self._setup_searchable_combo(self.client_filter)
         filters.addWidget(self.client_filter)
 
+        filters.addWidget(QLabel("Document type:"))
+
+        self.doc_type_filter = QComboBox()
+        filters.addWidget(self.doc_type_filter)
+
         filters.addWidget(QLabel("From:"))
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
@@ -94,6 +99,7 @@ class GenerateDocumentsPage(QWidget):
         self._output_folder: Optional[str] = None
 
         self._load_clients()
+        self._load_document_types()
         self._init_dates()
 
     def _setup_searchable_combo(self, combo: QComboBox) -> None:
@@ -116,6 +122,17 @@ class GenerateDocumentsPage(QWidget):
             self.client_filter.addItem(c["name"], c["id"])
         self.client_filter.setCurrentIndex(0)
         self.client_filter.blockSignals(False)
+
+    def _load_document_types(self) -> None:
+        types = GenerateDocumentsRepo.list_incident_types_options()
+
+        self.doc_type_filter.blockSignals(True)
+        self.doc_type_filter.clear()
+        self.doc_type_filter.addItem("All", "")
+        for t in types:
+            self.doc_type_filter.addItem(t["name"], t["code"])
+        self.doc_type_filter.setCurrentIndex(0)
+        self.doc_type_filter.blockSignals(False)
 
     def _init_dates(self) -> None:
         today = date.today()
@@ -153,11 +170,17 @@ class GenerateDocumentsPage(QWidget):
             client_id = ""
         client_id = client_id.strip() or None
 
+        doc_type_code = self.doc_type_filter.currentData()
+        if not isinstance(doc_type_code, str):
+            doc_type_code = ""
+        doc_type_code = doc_type_code.strip() or None
+
         try:
             incidents: List[IncidentForDoc] = GenerateDocumentsRepo.list_incidents_for_generation(
                 date_from=date_from,
                 date_to=date_to,
                 company_client_id=client_id,
+                incident_type_code=doc_type_code,
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load incidents.\n\n{e}")
@@ -181,9 +204,6 @@ class GenerateDocumentsPage(QWidget):
 
         # Cache active template metadata by (company_client_id, template_key)
         active_template_cache: Dict[Tuple[str, str], Tuple[str, int]] = {}
-
-        # Duplicate tracking (already generated) - we will SKIP them in generation
-        already_generated: List[str] = []
 
         for inc in incidents:
             code = (inc.code or "").strip()
@@ -220,20 +240,6 @@ class GenerateDocumentsPage(QWidget):
 
             storage_path, template_version = active_template_cache[cache_key]
 
-            # Check duplicate (already generated)
-            try:
-                exists = GeneratedDocumentsRepo.exists_for_incident(
-                    incident_id=inc.id,
-                    template_key=template_key,
-                    template_version=template_version,
-                )
-                if exists:
-                    already_generated.append(code)
-                    # We do NOT treat as error; we skip later.
-            except Exception as e:
-                errors.append(f"{code}: failed duplicate-check against generated_documents: {e}")
-                continue
-
             # Download template bytes once per client+key
             if cache_key not in template_cache:
                 try:
@@ -257,55 +263,29 @@ class GenerateDocumentsPage(QWidget):
             QMessageBox.critical(self, "Cannot generate", msg)
             return
 
-        # If everything is already generated, tell user and stop
-        # (still ALL-OR-NOTHING: nothing new to generate)
-        # NOTE: We check this by computing which ones we would generate.
-        to_generate: List[IncidentForDoc] = []
-        for inc in incidents:
-            template_key = inc.incident_type_code.strip()
-            ck = (inc.company_client_id, template_key)
-            _, template_version = active_template_cache[ck]
-
-            if not GeneratedDocumentsRepo.exists_for_incident(
-                incident_id=inc.id,
-                template_key=template_key,
-                template_version=template_version,
-            ):
-                to_generate.append(inc)
-
-        if not to_generate:
-            QMessageBox.information(
-                self,
-                "Nothing to do",
-                "All documents for the selected range were already generated for the current active template versions.",
-            )
-            return
-
-        # Optional: warn user that some were skipped (not an error)
-        if already_generated:
-            # Keep it short
-            QMessageBox.information(
-                self,
-                "Some already generated",
-                f"{len(already_generated)} incident(s) already have generated documents for the active template versions and will be skipped.",
-            )
-
         # -------------------------
         # GENERATE (safe to proceed)
         # -------------------------
         generated = 0
-        db_written = 0
 
         doc_prefix = "UD"
         doc_year = today.year
 
         try:
-            for inc in to_generate:
+            for inc in incidents:
                 template_key = inc.incident_type_code.strip()
                 cache_key = (inc.company_client_id, template_key)
 
                 template_bytes = template_cache[cache_key]
                 storage_path, template_version = active_template_cache[cache_key]
+
+                # Skip if already generated
+                if GeneratedDocumentsRepo.exists_for_incident(
+                    incident_id=inc.id,
+                    template_key=template_key,
+                    template_version=template_version,
+                ):
+                    continue
 
                 ctx = DocContext(
                     today=today,
@@ -352,11 +332,11 @@ class GenerateDocumentsPage(QWidget):
                     doc_code=doc_code,
                 )
 
-                db_written += 1
-
         except Exception as e:
             QMessageBox.critical(self, "Generation failed", str(e))
             return
+
+        QMessageBox.information(self, "Done", f"Successfully generated {generated} document(s).")
         
     def reload_clients(self) -> None:
         self._load_clients()
