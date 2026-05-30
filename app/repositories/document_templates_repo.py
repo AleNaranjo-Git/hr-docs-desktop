@@ -4,7 +4,7 @@ import os
 from typing import Any, Dict, List, Optional, TypedDict
 
 from app.core.session import AppSession
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 from app.core.events import events
 
 
@@ -43,13 +43,15 @@ class DocumentTemplatesRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("company_clients")
-            .select("id, name")
-            .eq("firm_id", firm_id)
-            .eq("is_active", True)
-            .order("name")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("company_clients")
+                .select("id, name")
+                .eq("firm_id", firm_id)
+                .eq("is_active", True)
+                .order("name")
+                .execute()
+            )
         )
 
         data = resp.data or []
@@ -63,11 +65,13 @@ class DocumentTemplatesRepo:
     def list_incident_types_options() -> List[IncidentTypeOption]:
         sb = get_supabase()
 
-        resp = (
-            sb.table("incident_types")
-            .select("id, code, name")
-            .order("id")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incident_types")
+                .select("id, code, name")
+                .order("id")
+                .execute()
+            )
         )
 
         data = resp.data or []
@@ -100,7 +104,7 @@ class DocumentTemplatesRepo:
         if company_client_id:
             query = query.eq("company_client_id", company_client_id)
 
-        resp = query.execute()
+        resp = execute_with_auth_retry(lambda: query.execute())
         data = resp.data or []
 
         out: List[TemplateRow] = []
@@ -133,15 +137,17 @@ class DocumentTemplatesRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("document_templates")
-            .select("version")
-            .eq("firm_id", firm_id)
-            .eq("company_client_id", company_client_id)
-            .eq("template_key", template_key)
-            .order("version", desc=True)
-            .limit(1)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("document_templates")
+                .select("version")
+                .eq("firm_id", firm_id)
+                .eq("company_client_id", company_client_id)
+                .eq("template_key", template_key)
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+            )
         )
 
         data = resp.data or []
@@ -195,11 +201,13 @@ class DocumentTemplatesRepo:
         DocumentTemplatesRepo._upload_docx_to_storage(storage_path, local_file_path)
 
         # 2) Deactivate previous active
-        sb.table("document_templates").update(
-            {"is_active": False}
-        ).eq("firm_id", firm_id).eq("company_client_id", company_client_id).eq(
-            "template_key", template_key
-        ).eq("is_active", True).execute()
+        execute_with_auth_retry(
+            lambda: sb.table("document_templates").update(
+                {"is_active": False}
+            ).eq("firm_id", firm_id).eq("company_client_id", company_client_id).eq(
+                "template_key", template_key
+            ).eq("is_active", True).execute()
+        )
 
         # 3) Insert the new active template row
         payload: Dict[str, Any] = {
@@ -211,7 +219,7 @@ class DocumentTemplatesRepo:
             "is_active": True,
         }
 
-        sb.table("document_templates").insert(payload).execute()
+        execute_with_auth_retry(lambda: sb.table("document_templates").insert(payload).execute())
         
         events().templates_changed.emit()
 
@@ -220,8 +228,10 @@ class DocumentTemplatesRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        sb.table("document_templates").update(
-            {"is_active": False}
-        ).eq("id", template_id).eq("firm_id", firm_id).execute()
+        execute_with_auth_retry(
+            lambda: sb.table("document_templates").update(
+                {"is_active": False}
+            ).eq("id", template_id).eq("firm_id", firm_id).execute()
+        )
         
         events().templates_changed.emit()

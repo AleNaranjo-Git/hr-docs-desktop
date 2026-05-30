@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import partial
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QWidget,
     QMainWindow,
@@ -112,6 +113,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("HR Docs Desktop")
+        self._logout_handled = False
 
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -135,7 +137,7 @@ class MainWindow(QMainWindow):
         self.reports_page: ReportsPage | None = None
 
         self.pages: dict[str, int] = {}
-        self._build_pages()
+        self._pages_cache: dict[str, QWidget] = {}
 
         # Navigation
         self.sidebar.navigate.connect(self.go_to)
@@ -150,25 +152,48 @@ class MainWindow(QMainWindow):
 
         self.go_to("add_client")
 
+    def _get_or_create_page(self, key: str) -> QWidget:
+        """Lazy load pages: create only when first accessed."""
+        if key in self._pages_cache:
+            return self._pages_cache[key]
+
+        # Create the page on-demand
+        if key == "add_client":
+            page = CompanyClientsPage()
+            self.company_clients_page = page
+        elif key == "add_template":
+            page = TemplatesPage()
+            self.templates_page = page
+        elif key == "add_worker":
+            page = WorkersPage()
+            self.workers_page = page
+        elif key == "incidents":
+            page = IncidentsPage()
+            self.incidents_page = page
+        elif key == "generate_documents":
+            page = GenerateDocumentsPage()
+            self.generate_documents_page = page
+        elif key == "reports":
+            page = ReportsPage()
+            self.reports_page = page
+        else:
+            return None
+
+        # Add to stack and cache
+        idx = self.stack.addWidget(page)
+        self.pages[key] = idx
+        self._pages_cache[key] = page
+        return page
+
     def _build_pages(self) -> None:
-        self.company_clients_page = CompanyClientsPage()
-        self.templates_page = TemplatesPage()
-        self.workers_page = WorkersPage()
-        self.incidents_page = IncidentsPage()
-        self.generate_documents_page = GenerateDocumentsPage()
-        self.reports_page = ReportsPage()
-
-        self._add_page("add_client", self.company_clients_page)
-        self._add_page("add_template", self.templates_page)
-        self._add_page("add_worker", self.workers_page)
-        self._add_page("incidents", self.incidents_page)
-        self._add_page("generate_documents", self.generate_documents_page)
-        self._add_page("reports", self.reports_page)
-
-    def _add_page(self, key: str, page: QWidget) -> None:
-        self.pages[key] = self.stack.addWidget(page)
+        # Legacy method for compatibility; pages are now lazy-loaded.
+        pass
 
     def go_to(self, key: str) -> None:
+        if key not in self.pages and key not in self._pages_cache:
+            # Create page if not yet loaded
+            self._get_or_create_page(key)
+        
         if key not in self.pages:
             return
         self.stack.setCurrentIndex(self.pages[key])
@@ -221,6 +246,16 @@ class MainWindow(QMainWindow):
             self.templates_page.refresh()
 
     def on_logout(self) -> None:
+        self._logout_handled = True
         sign_out()
         self.logged_out.emit()
         self.close()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # End server-side session on graceful window close.
+        if not self._logout_handled:
+            try:
+                sign_out()
+            except Exception:
+                pass
+        super().closeEvent(event)

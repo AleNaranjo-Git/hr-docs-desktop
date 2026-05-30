@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.core.session import AppSession, SessionState
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 
 
 class AuthError(Exception):
@@ -13,13 +13,15 @@ class AuthError(Exception):
 def _fetch_firm_id_for_user(user_id: str) -> str:
     sb = get_supabase()
     try:
-        resp = (
-            sb.table("profiles")
-            .select("firm_id")
-            .eq("user_id", user_id)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("profiles")
+                .select("firm_id")
+                .eq("user_id", user_id)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
         )
     except Exception as e:
         raise AuthError(f"Failed to fetch firm profile: {e}") from e

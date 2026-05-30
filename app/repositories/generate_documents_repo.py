@@ -6,7 +6,7 @@ from datetime import date
 from typing import Any, List, Optional, TypedDict
 
 from app.core.session import AppSession
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 
 
 TEMPLATES_BUCKET = os.getenv("SUPABASE_TEMPLATES_BUCKET", "templates")
@@ -14,6 +14,11 @@ TEMPLATES_BUCKET = os.getenv("SUPABASE_TEMPLATES_BUCKET", "templates")
 
 class CompanyClientOption(TypedDict):
     id: str
+    name: str
+
+
+class IncidentTypeOption(TypedDict):
+    code: str
     name: str
 
 
@@ -57,13 +62,15 @@ class GenerateDocumentsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("company_clients")
-            .select("id, name")
-            .eq("firm_id", firm_id)
-            .eq("is_active", True)
-            .order("name")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("company_clients")
+                .select("id, name")
+                .eq("firm_id", firm_id)
+                .eq("is_active", True)
+                .order("name")
+                .execute()
+            )
         )
 
         data = resp.data or []
@@ -76,27 +83,53 @@ class GenerateDocumentsRepo:
         return out
 
     @staticmethod
+    def list_incident_types_options() -> List[IncidentTypeOption]:
+        sb = get_supabase()
+
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incident_types")
+                .select("code, name")
+                .order("name")
+                .execute()
+            )
+        )
+
+        data = resp.data or []
+        out: List[IncidentTypeOption] = []
+
+        for r in data:
+            if isinstance(r, dict):
+                out.append({"code": str(r.get("code", "")), "name": str(r.get("name", ""))})
+
+        return out
+
+    @staticmethod
     def list_incidents_for_generation(
         *,
         date_from: date,
         date_to: date,
         company_client_id: Optional[str],
+        incident_type_code: Optional[str] = None,
     ) -> List[IncidentForDoc]:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("incidents")
-            .select(
-                "id, code, incident_date, received_day, observations, "
-                "worker:workers(full_name, national_id, company_client_id, company_client:company_clients(name)), "
-                "type:incident_types(code, name)"
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incidents")
+                .select(
+                    "id, code, incident_date, received_day, observations, manual_handling, "
+                    "worker:workers(full_name, national_id, company_client_id, company_client:company_clients(name)), "
+                    "type:incident_types(code, name)"
+                )
+                .eq("firm_id", firm_id)
+                .eq("manual_handling", False)
+                .gte("incident_date", str(date_from))
+                .lte("incident_date", str(date_to))
+                .order("incident_date", desc=False)
+                .execute()
             )
-            .eq("firm_id", firm_id)
-            .gte("incident_date", str(date_from))
-            .lte("incident_date", str(date_to))
-            .order("incident_date", desc=False)
-            .execute()
         )
 
         data = resp.data or []
@@ -117,6 +150,10 @@ class GenerateDocumentsRepo:
 
             cc_id = str(worker.get("company_client_id", ""))
             if company_client_id and cc_id != company_client_id:
+                continue
+
+            type_code = str(itype.get("code", ""))
+            if incident_type_code and type_code != incident_type_code:
                 continue
 
             inc_date = _parse_iso_date(r.get("incident_date"))
@@ -155,16 +192,18 @@ class GenerateDocumentsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("document_templates")
-            .select("storage_path, version")
-            .eq("firm_id", firm_id)
-            .eq("company_client_id", company_client_id)
-            .eq("template_key", template_key)
-            .eq("is_active", True)
-            .order("version", desc=True)
-            .limit(1)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("document_templates")
+                .select("storage_path, version")
+                .eq("firm_id", firm_id)
+                .eq("company_client_id", company_client_id)
+                .eq("template_key", template_key)
+                .eq("is_active", True)
+                .order("version", desc=True)
+                .limit(1)
+                .execute()
+            )
         )
 
         rows = resp.data or []

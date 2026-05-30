@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, TypedDict
 
 from app.core.session import AppSession
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 from app.core.events import events
 
 
@@ -28,13 +28,15 @@ class WorkersRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("company_clients")
-            .select("id, name")
-            .eq("firm_id", firm_id)
-            .eq("is_active", True)
-            .order("name")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("company_clients")
+                .select("id, name")
+                .eq("firm_id", firm_id)
+                .eq("is_active", True)
+                .order("name")
+                .execute()
+            )
         )
 
         data = resp.data or []
@@ -62,7 +64,7 @@ class WorkersRepo:
         if company_client_id:
             query = query.eq("company_client_id", company_client_id)
 
-        resp = query.execute()
+        resp = execute_with_auth_retry(lambda: query.execute())
         data = resp.data or []
 
         out: List[WorkerRow] = []
@@ -107,7 +109,7 @@ class WorkersRepo:
             "email": (email or "").strip() or None,
         }
 
-        sb.table("workers").insert(payload).execute()
+        execute_with_auth_retry(lambda: sb.table("workers").insert(payload).execute())
         events().workers_changed.emit()
 
     @staticmethod
@@ -115,5 +117,7 @@ class WorkersRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        sb.table("workers").update({"is_active": False}).eq("id", worker_id).eq("firm_id", firm_id).execute()
+        execute_with_auth_retry(
+            lambda: sb.table("workers").update({"is_active": False}).eq("id", worker_id).eq("firm_id", firm_id).execute()
+        )
         events().workers_changed.emit()

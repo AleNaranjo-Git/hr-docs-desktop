@@ -5,7 +5,7 @@ from datetime import date
 from typing import Dict, List, Optional
 
 from app.core.session import AppSession
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 
 
 INCIDENT_TYPE_TO_FALTA_ES = {
@@ -52,13 +52,15 @@ class ReportsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("company_clients")
-            .select("id, name")
-            .eq("firm_id", firm_id)
-            .eq("is_active", True)
-            .order("name")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("company_clients")
+                .select("id, name")
+                .eq("firm_id", firm_id)
+                .eq("is_active", True)
+                .order("name")
+                .execute()
+            )
         )
 
         if hasattr(resp, "error") and resp.error:
@@ -79,12 +81,14 @@ class ReportsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("incident_report_meta")
-            .select("incident_id, status, report_observations")
-            .eq("firm_id", firm_id)
-            .in_("incident_id", incident_ids)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incident_report_meta")
+                .select("incident_id, status, report_observations")
+                .eq("firm_id", firm_id)
+                .in_("incident_id", incident_ids)
+                .execute()
+            )
         )
 
         if hasattr(resp, "error") and resp.error:
@@ -126,13 +130,15 @@ class ReportsRepo:
         if not patch:
             return
 
-        check = (
-            sb.table("incident_report_meta")
-            .select("incident_id")
-            .eq("firm_id", firm_id)
-            .eq("incident_id", incident_id)
-            .limit(1)
-            .execute()
+        check = execute_with_auth_retry(
+            lambda: (
+                sb.table("incident_report_meta")
+                .select("incident_id")
+                .eq("firm_id", firm_id)
+                .eq("incident_id", incident_id)
+                .limit(1)
+                .execute()
+            )
         )
 
         if hasattr(check, "error") and check.error:
@@ -141,19 +147,21 @@ class ReportsRepo:
         exists = bool(check.data) and isinstance(check.data, list) and len(check.data) > 0
 
         if exists:
-            resp = (
-                sb.table("incident_report_meta")
-                .update(patch)
-                .eq("firm_id", firm_id)
-                .eq("incident_id", incident_id)
-                .execute()
+            resp = execute_with_auth_retry(
+                lambda: (
+                    sb.table("incident_report_meta")
+                    .update(patch)
+                    .eq("firm_id", firm_id)
+                    .eq("incident_id", incident_id)
+                    .execute()
+                )
             )
             if hasattr(resp, "error") and resp.error:
                 raise RuntimeError(resp.error)
             return
 
         payload = {"firm_id": firm_id, "incident_id": incident_id, **patch}
-        resp = sb.table("incident_report_meta").insert(payload).execute()
+        resp = execute_with_auth_retry(lambda: sb.table("incident_report_meta").insert(payload).execute())
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(resp.error)
 
@@ -167,18 +175,20 @@ class ReportsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("incidents")
-            .select(
-                "id, code, received_day, incident_date, "
-                "type:incident_types(code, name), "
-                "worker:workers(full_name, national_id, email, company_client_id, company_client:company_clients(name))"
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incidents")
+                .select(
+                    "id, code, received_day, incident_date, "
+                    "type:incident_types(code, name), "
+                    "worker:workers(full_name, national_id, email, company_client_id, company_client:company_clients(name))"
+                )
+                .eq("firm_id", firm_id)
+                .gte("received_day", str(date_from))
+                .lte("received_day", str(date_to))
+                .order("received_day", desc=False)
+                .execute()
             )
-            .eq("firm_id", firm_id)
-            .gte("received_day", str(date_from))
-            .lte("received_day", str(date_to))
-            .order("received_day", desc=False)
-            .execute()
         )
 
         if hasattr(resp, "error") and resp.error:

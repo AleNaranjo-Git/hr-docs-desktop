@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.core.session import AppSession
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 
 
 class GeneratedDocumentsRepo:
@@ -17,15 +17,17 @@ class GeneratedDocumentsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("generated_documents")
-            .select("id")
-            .eq("firm_id", firm_id)
-            .eq("incident_id", incident_id)
-            .eq("template_key", template_key)
-            .eq("template_version", template_version)
-            .limit(1)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("generated_documents")
+                .select("id")
+                .eq("firm_id", firm_id)
+                .eq("incident_id", incident_id)
+                .eq("template_key", template_key)
+                .eq("template_version", template_version)
+                .limit(1)
+                .execute()
+            )
         )
 
         rows = resp.data or []
@@ -60,7 +62,7 @@ class GeneratedDocumentsRepo:
             "doc_code": doc_code,
         }
 
-        resp = sb.table("generated_documents").insert(payload).execute()
+        resp = execute_with_auth_retry(lambda: sb.table("generated_documents").insert(payload).execute())
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to record generated document: {resp.error}")
@@ -74,16 +76,18 @@ class GeneratedDocumentsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("generated_documents")
-            .select("doc_seq")
-            .eq("firm_id", firm_id)
-            .eq("company_client_id", company_client_id)
-            .eq("doc_prefix", doc_prefix)
-            .eq("doc_year", doc_year)
-            .order("doc_seq", desc=True)
-            .limit(1)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("generated_documents")
+                .select("doc_seq")
+                .eq("firm_id", firm_id)
+                .eq("company_client_id", company_client_id)
+                .eq("doc_prefix", doc_prefix)
+                .eq("doc_year", doc_year)
+                .order("doc_seq", desc=True)
+                .limit(1)
+                .execute()
+            )
         )
 
         data = resp.data or []

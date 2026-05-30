@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, TypedDict
 
 from app.core.session import AppSession
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 from app.core.events import events
 
 
@@ -36,13 +36,15 @@ class IncidentsRepo:
         firm_id = AppSession.require().firm_id
 
         # IMPORTANT: your workers table FK is company_client_id (not client_id)
-        resp = (
-            sb.table("workers")
-            .select("id, full_name, company_clients(name)")
-            .eq("firm_id", firm_id)
-            .eq("is_active", True)
-            .order("full_name")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("workers")
+                .select("id, full_name, company_clients(name)")
+                .eq("firm_id", firm_id)
+                .eq("is_active", True)
+                .order("full_name")
+                .execute()
+            )
         )
 
         if hasattr(resp, "error") and resp.error:
@@ -77,11 +79,13 @@ class IncidentsRepo:
     def list_incident_types_options() -> List[IncidentTypeOption]:
         sb = get_supabase()
 
-        resp = (
-            sb.table("incident_types")
-            .select("id, code, name")
-            .order("id")
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incident_types")
+                .select("id, code, name")
+                .order("id")
+                .execute()
+            )
         )
 
         if hasattr(resp, "error") and resp.error:
@@ -126,7 +130,7 @@ class IncidentsRepo:
         if worker_id:
             query = query.eq("worker_id", worker_id)
 
-        resp = query.execute()
+        resp = execute_with_auth_retry(lambda: query.execute())
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to load incidents: {resp.error}")
@@ -189,7 +193,7 @@ class IncidentsRepo:
             "manual_handling": manual_handling,
         }
 
-        resp = sb.table("incidents").insert(payload).execute()
+        resp = execute_with_auth_retry(lambda: sb.table("incidents").insert(payload).execute())
 
         if hasattr(resp, "error") and resp.error:
             raise RuntimeError(f"Failed to create incident: {resp.error}")
@@ -201,12 +205,14 @@ class IncidentsRepo:
         sb = get_supabase()
         firm_id = AppSession.require().firm_id
 
-        resp = (
-            sb.table("incidents")
-            .delete()
-            .eq("id", incident_id)
-            .eq("firm_id", firm_id)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("incidents")
+                .delete()
+                .eq("id", incident_id)
+                .eq("firm_id", firm_id)
+                .execute()
+            )
         )
 
         if hasattr(resp, "error") and resp.error:

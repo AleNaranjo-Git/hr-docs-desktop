@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypedDict, Any, List, cast
 
-from app.db.supabase_client import get_supabase
+from app.db.supabase_client import get_supabase, execute_with_auth_retry
 from app.core.session import AppSession
 from app.core.events import events
 
@@ -21,13 +21,15 @@ class CompanyClientsRepo:
         sb = get_supabase()
         firm_id: str = AppSession.require().firm_id
 
-        resp = (
-            sb.table("company_clients")
-            .select("id, name, legal_id, description, created_at")
-            .eq("firm_id", firm_id)
-            .eq("is_active", True)
-            .order("created_at", desc=True)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("company_clients")
+                .select("id, name, legal_id, description, created_at")
+                .eq("firm_id", firm_id)
+                .eq("is_active", True)
+                .order("created_at", desc=True)
+                .execute()
+            )
         )
 
         if getattr(resp, "error", None):
@@ -51,7 +53,7 @@ class CompanyClientsRepo:
             "description": description,
         }
 
-        resp = sb.table("company_clients").insert(payload).execute()
+        resp = execute_with_auth_retry(lambda: sb.table("company_clients").insert(payload).execute())
 
         if getattr(resp, "error", None):
             raise RuntimeError(f"Failed to create client: {resp.error}")
@@ -63,12 +65,14 @@ class CompanyClientsRepo:
         sb = get_supabase()
         firm_id: str = AppSession.require().firm_id
 
-        resp = (
-            sb.table("company_clients")
-            .update({"is_active": False})
-            .eq("id", client_id)
-            .eq("firm_id", firm_id)
-            .execute()
+        resp = execute_with_auth_retry(
+            lambda: (
+                sb.table("company_clients")
+                .update({"is_active": False})
+                .eq("id", client_id)
+                .eq("firm_id", firm_id)
+                .execute()
+            )
         )
 
         if getattr(resp, "error", None):
